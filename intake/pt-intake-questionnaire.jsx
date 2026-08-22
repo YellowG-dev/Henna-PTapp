@@ -13,7 +13,7 @@ import {
   ChevronLeft,
   ChevronRight,
   ClipboardCheck,
-  Share2,
+  Send,
 } from "lucide-react";
 
 /* ------------------------------- Design tokens -------------------------------
@@ -38,10 +38,14 @@ const FONT_MONO = "'IBM Plex Mono', ui-monospace, monospace";
 
 const SKIP = "__SKIP__";
 const STORAGE_KEY = "intake-progress";
-// Feature-detected once at load: file-sharing via the Web Share API needs
-// both navigator.share and navigator.canShare (the file-sharing check).
-// Doesn't change mid-session, so no need to recompute per render.
-const SHARE_SUPPORTED = typeof navigator !== "undefined" && Boolean(navigator.share) && Boolean(navigator.canShare);
+
+/* ---------------------------- Submission endpoint ----------------------------
+   Set in index.html as window.PT_ENDPOINT_URL, NOT here — index.html is small
+   and human-readable, so the URL can be changed without rebuilding the bundle.
+   If it's unset, the Send button hides itself and Copy remains the only
+   option, so the form still works fully un-configured.
+-------------------------------------------------------------------------- */
+const ENDPOINT_URL = (typeof window !== "undefined" && window.PT_ENDPOINT_URL) || "";
 
 function FontImport() {
   return (
@@ -687,9 +691,10 @@ function ReviewPanel({
   onJump,
   onCopy,
   copyStatus,
-  onShare,
-  shareStatus,
-  canShare,
+  onSend,
+  sendStatus,
+  sent,
+  canSend,
   onReset,
   showResetConfirm,
   setShowResetConfirm,
@@ -748,21 +753,33 @@ function ReviewPanel({
           Send your answers
         </p>
         <p style={{ color: TEXT_MUTED }} className="text-[11px] mb-2">
-          {canShare
-            ? "Share the file straight to WhatsApp, Messages, or email — or copy the text below."
+          {canSend
+            ? "One tap sends your answers straight to your coach."
             : "Copy the text below and send it back — it's what gets used to tailor the app."}
         </p>
-        {canShare && (
-          <button
-            type="button"
-            onClick={onShare}
-            style={{ background: ACCENT_A, color: "#14171C" }}
-            className="w-full flex items-center justify-center gap-1.5 text-sm font-semibold px-3 py-2 rounded-lg mb-2 focus:outline-none focus-visible:ring-2"
-          >
-            <Share2 size={15} />
-            {shareStatus || "Share"}
-          </button>
+        {canSend && (
+          <>
+            <button
+              type="button"
+              onClick={onSend}
+              style={{ background: sent ? CARD : ACCENT_A, color: sent ? TEXT_SECONDARY : "#14171C", borderColor: BORDER }}
+              className={`w-full flex items-center justify-center gap-1.5 text-sm font-semibold px-3 py-2 rounded-lg mb-2 focus:outline-none focus-visible:ring-2 ${
+                sent ? "border" : ""
+              }`}
+            >
+              <Send size={15} />
+              {sendStatus || (sent ? "Send again" : "Send answers")}
+            </button>
+            {sent && (
+              <p style={{ color: TEXT_MUTED }} className="text-[11px] mb-2 text-center">
+                Sent. You can close this now — no need to do anything else.
+              </p>
+            )}
+          </>
         )}
+        <p style={{ color: TEXT_MUTED }} className="text-[10px] mb-1.5">
+          Backup option — if sending fails, copy this text and message it instead:
+        </p>
         <textarea
           readOnly
           rows={6}
@@ -820,7 +837,8 @@ export default function IntakeQuestionnaire() {
   const [step, setStep] = useState(0);
   const [loading, setLoading] = useState(true);
   const [copyStatus, setCopyStatus] = useState("");
-  const [shareStatus, setShareStatus] = useState("");
+  const [sendStatus, setSendStatus] = useState("");
+  const [sent, setSent] = useState(false);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [warnRequired, setWarnRequired] = useState(false);
 
@@ -883,33 +901,38 @@ export default function IntakeQuestionnaire() {
     setTimeout(() => setCopyStatus(""), 2500);
   };
 
-  // Hands the answers off as a real file to the device's native share sheet
-  // (WhatsApp, Messages, Mail, etc.) — only rendered when SHARE_SUPPORTED.
-  // Empty title avoids a known iOS Safari quirk where a non-empty title can
-  // break file attachment when sharing to WhatsApp/Instagram.
-  const shareAnswers = async () => {
+  // Posts the answers straight to the Google Apps Script endpoint.
+  //
+  // Content-Type MUST stay text/plain — do not change to application/json.
+  // Apps Script exposes only doGet/doPost, has no doOptions, and so cannot
+  // answer a CORS preflight (it returns 405). application/json triggers that
+  // preflight; text/plain is CORS-safelisted and skips it. The server-side
+  // script JSON.parses the body, so the data arrives as JSON regardless.
+  const sendAnswers = async () => {
+    if (!ENDPOINT_URL) return;
+    setSendStatus("Sending…");
     const { payload } = buildSummary(answers);
-    const text = JSON.stringify(payload, null, 2);
-    const safeName = (answers.name || "intake")
-      .toLowerCase()
-      .trim()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/(^-|-$)/g, "");
-    const file = new File([text], `${safeName || "intake"}-answers.json`, { type: "application/json" });
-    if (!navigator.canShare || !navigator.canShare({ files: [file] })) {
-      setShareStatus("Not supported here — use Copy instead");
-      setTimeout(() => setShareStatus(""), 3000);
-      return;
-    }
     try {
-      await navigator.share({ files: [file], title: "" });
-      setShareStatus("Shared");
-    } catch (e) {
-      if (e && e.name !== "AbortError") {
-        setShareStatus("Couldn't share — try Copy instead");
+      const res = await fetch(ENDPOINT_URL, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify({
+          person: answers.name || "unknown",
+          kind: "intake",
+          payload,
+        }),
+      });
+      const data = await res.json();
+      if (data && data.ok) {
+        setSendStatus("Sent ✓");
+        setSent(true);
+      } else {
+        setSendStatus("Failed — use Copy below");
       }
+    } catch (e) {
+      setSendStatus("Failed — check connection, or use Copy");
     }
-    setTimeout(() => setShareStatus(""), 2500);
+    setTimeout(() => setSendStatus(""), 5000);
   };
 
   if (loading) {
@@ -972,9 +995,10 @@ export default function IntakeQuestionnaire() {
             onJump={jumpTo}
             onCopy={copyAnswers}
             copyStatus={copyStatus}
-            onShare={shareAnswers}
-            shareStatus={shareStatus}
-            canShare={SHARE_SUPPORTED}
+            onSend={sendAnswers}
+            sendStatus={sendStatus}
+            sent={sent}
+            canSend={Boolean(ENDPOINT_URL)}
             onReset={resetAll}
             showResetConfirm={showResetConfirm}
             setShowResetConfirm={setShowResetConfirm}
