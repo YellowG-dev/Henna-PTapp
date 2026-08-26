@@ -1,6 +1,6 @@
 {
-  "name": "Henna · Training",
-  "short_name": "Henna",
+  "name": "Daily PT",
+  "short_name": "Daily PT",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

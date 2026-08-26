@@ -7,7 +7,7 @@ import {
   LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, ResponsiveContainer,
 } from "recharts";
 
-import PROGRAM, { APP_VERSION, MOBILITY, BLOCKS, STRENGTH_OPTIONS } from "./core/program-henna.js";
+import PROGRAM, { APP_VERSION, MOBILITY, BLOCKS, SLOT_OPTIONS, SLOT_META } from "./core/program-henna.js";
 import {
   resolveSchedule, buildSections, buildHistoryRows, isTaskDone, countableTasks,
   computeScaleSeries, computeLoadSeries, dateKey, daysBetween, getISOWeek,
@@ -99,7 +99,7 @@ export default function HennaApp() {
   const [calYear, setCalYear] = useState(today.getFullYear());
   const [calMonth, setCalMonth] = useState(today.getMonth());
   const [calSelected, setCalSelected] = useState(today);
-  const [editingBlock, setEditingBlock] = useState(false);
+  const [editingBlock, setEditingBlock] = useState(null);
   const [activityDraft, setActivityDraft] = useState("");
   const [moveSource, setMoveSource] = useState(null);
 
@@ -241,31 +241,31 @@ export default function HennaApp() {
     });
   }, []);
 
-  const setBlock = useCallback((d, value) => {
+  const setBlock = useCallback((d, slot, value) => {
     const key = dateKey(d);
-    writeOverrides((prev) => ({ ...prev, [key]: { ...(prev[key] || {}), strength: value } }));
+    writeOverrides((prev) => ({ ...prev, [key]: { ...(prev[key] || {}), [slot]: value } }));
   }, [writeOverrides]);
 
-  const resetBlock = useCallback((d) => {
+  const resetBlock = useCallback((d, slot) => {
     const key = dateKey(d);
     writeOverrides((prev) => {
       if (!prev[key]) return prev;
       const day = { ...prev[key] };
-      delete day.strength;
+      delete day[slot];
       const next = { ...prev };
       if (Object.keys(day).length === 0) delete next[key]; else next[key] = day;
       return next;
     });
   }, [writeOverrides]);
 
-  const swapBlock = useCallback((a, b) => {
+  const swapBlock = useCallback((a, b, slot) => {
     const ka = dateKey(a), kb = dateKey(b);
-    const ia = resolveSchedule(a, "auto", overrides, PROGRAM).slots.strength;
-    const ib = resolveSchedule(b, "auto", overrides, PROGRAM).slots.strength;
+    const ia = resolveSchedule(a, "auto", overrides, PROGRAM).slots[slot];
+    const ib = resolveSchedule(b, "auto", overrides, PROGRAM).slots[slot];
     writeOverrides((prev) => ({
       ...prev,
-      [ka]: { ...(prev[ka] || {}), strength: ib },
-      [kb]: { ...(prev[kb] || {}), strength: ia },
+      [ka]: { ...(prev[ka] || {}), [slot]: ib },
+      [kb]: { ...(prev[kb] || {}), [slot]: ia },
     }));
   }, [overrides, writeOverrides]);
 
@@ -288,7 +288,7 @@ export default function HennaApp() {
       const day = { ...prev[key] };
       day.activities = day.activities.filter((a) => a.id !== id);
       const next = { ...prev };
-      if (day.activities.length === 0 && !("strength" in day)) delete next[key];
+      if (day.activities.length === 0 && !PROGRAM.slots.some((sl) => sl in day)) delete next[key];
       else next[key] = day;
       return next;
     });
@@ -442,7 +442,7 @@ export default function HennaApp() {
           <div className="flex-1 min-w-0">
             <p style={{ fontFamily: FONT_BODY, color: ROSE, letterSpacing: "0.16em" }}
                className="text-[10px] uppercase font-semibold">
-              Henna · Daily Log
+              Daily PT · Henna
             </p>
             {view === "today" ? (
               <div className="flex items-center gap-1 mt-1 -ml-1.5">
@@ -860,15 +860,15 @@ export default function HennaApp() {
                            data={symptomSeries} color={ROSE} domain={[1, 5]} unit="/5" />
               )}
 
-              {exercisesWithHistory.length > 0 && (
+              {(
                 <div style={{ background: CARD, borderColor: BORDER }} className="rounded-2xl border p-4">
                   <div className="flex items-center justify-between gap-2 mb-3">
                     <h2 style={{ fontFamily: FONT_DISPLAY }} className="text-sm font-semibold">Getting stronger</h2>
-                    <select value={selectedExerciseId || ""} onChange={(e) => setSelectedExerciseId(e.target.value)}
+                    {exercisesWithHistory.length > 0 && <select value={selectedExerciseId || ""} onChange={(e) => setSelectedExerciseId(e.target.value)}
                             style={{ background: BG, borderColor: BORDER, color: TEXT_PRIMARY }}
                             className="text-[11px] px-2 py-1 rounded-lg border max-w-[150px]">
                       {exercisesWithHistory.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
-                    </select>
+                    </select>}
                   </div>
                   {loadSeries.length > 1 ? (
                     <div style={{ width: "100%", height: 150 }}>
@@ -884,7 +884,11 @@ export default function HennaApp() {
                       </ResponsiveContainer>
                     </div>
                   ) : (
-                    <p style={{ color: TEXT_MUTED }} className="text-xs">Log this exercise twice and a trend appears here.</p>
+                    <p style={{ color: TEXT_MUTED }} className="text-xs">
+                      {exercisesWithHistory.length === 0
+                        ? "Type the weight and reps into each set while you train, and your progress appears here — one line per exercise."
+                        : "Log this exercise on two sessions and a trend appears here."}
+                    </p>
                   )}
                 </div>
               )}
@@ -991,10 +995,10 @@ function CalendarView(p) {
   };
 
   const pick = (d) => {
-    p.setEditingBlock(false);
+    p.setEditingBlock(null);
     p.setActivityDraft("");
     if (p.moveSource) {
-      if (dateKey(p.moveSource) !== dateKey(d)) p.swapBlock(p.moveSource, d);
+      if (dateKey(p.moveSource.date) !== dateKey(d)) p.swapBlock(p.moveSource.date, d, p.moveSource.slot);
       p.setMoveSource(null);
     }
     p.setCalSelected(d);
@@ -1019,7 +1023,7 @@ function CalendarView(p) {
 
       {p.moveSource && (
         <div style={{ background: "rgba(201,115,136,0.1)", borderColor: ROSE }} className="flex items-center justify-between gap-2 rounded-xl border px-3 py-2 mb-3">
-          <p className="text-xs">Moving a session — tap the day to swap it with.</p>
+          <p className="text-xs">Moving {SLOT_META[p.moveSource.slot].label.toLowerCase()} — tap the day to swap it with.</p>
           <button onClick={() => p.setMoveSource(null)} style={{ color: ROSE }} className="text-xs font-semibold shrink-0">Cancel</button>
         </div>
       )}
@@ -1049,7 +1053,7 @@ function CalendarView(p) {
                   <span className="flex gap-0.5 h-1.5">
                     {i.slots.strength && <span style={{ background: ROSE }} className="w-1.5 h-1.5 rounded-full" />}
                     {i.activities.length > 0 && <span style={{ background: CATS.activity.color }} className="w-1.5 h-1.5 rounded-full" />}
-                    {d.getDay() === 0 && <span style={{ background: CATS.yoga.color }} className="w-1.5 h-1.5 rounded-full" />}
+                    {i.slots.yoga && <span style={{ background: CATS.yoga.color }} className="w-1.5 h-1.5 rounded-full" />}
                   </span>
                 </button>
               );
@@ -1073,52 +1077,73 @@ function CalendarView(p) {
           </h3>
         </div>
 
-        <div style={{ borderColor: BORDER, borderLeftColor: ROSE }} className="border-t border-l-4 px-4 py-3">
-          <div className="flex items-center justify-between flex-wrap gap-y-1.5">
-            <div className="flex items-center gap-2">
-              <Dumbbell size={14} style={{ color: ROSE }} />
-              <p style={{ fontFamily: FONT_DISPLAY }} className="text-xs font-semibold">{block ? block.label : "No session"}</p>
-            </div>
-            <div className="flex items-center gap-2.5">
-              {selInfo.slots.strength && (
-                <button onClick={() => p.setMoveSource(p.moveSource ? null : p.calSelected)} style={{ color: ROSE }} className="text-[11px] font-semibold">
-                  ⇄ Move
-                </button>
-              )}
-              <button onClick={() => p.setEditingBlock(!p.editingBlock)} style={{ color: TEXT_SECONDARY }} className="text-[11px] font-semibold">
-                {selInfo.slots.strength ? "Change" : "Add"}
-              </button>
-              {selInfo.moved.strength && (
-                <button onClick={() => p.resetBlock(p.calSelected)} style={{ color: TEXT_MUTED }} className="text-[11px] font-semibold">Reset</button>
-              )}
-            </div>
-          </div>
-
-          {p.editingBlock && (
-            <div className="flex gap-1.5 flex-wrap mt-2">
-              {STRENGTH_OPTIONS.map((opt) => (
-                <button key={String(opt.value)} onClick={() => { p.setBlock(p.calSelected, opt.value); p.setEditingBlock(false); }}
-                        style={{ background: selInfo.slots.strength === opt.value ? ROSE : "transparent",
-                                 color: selInfo.slots.strength === opt.value ? "#fff" : TEXT_SECONDARY,
-                                 borderColor: selInfo.slots.strength === opt.value ? ROSE : BORDER }}
-                        className="text-[11px] font-semibold px-2.5 py-1 rounded-lg border">
-                  {opt.label}
-                </button>
-              ))}
-            </div>
-          )}
-
-          {block && (
-            <div className="space-y-1 mt-2">
-              {block.exercises.map((e) => (
-                <div key={e.id} className="flex items-center justify-between gap-2">
-                  <span className="text-xs flex-1">{e.name}</span>
-                  <span style={{ fontFamily: FONT_MONO, color: TEXT_MUTED }} className="text-[11px] shrink-0">{e.presc}</span>
+        {PROGRAM.slots.map((slotName) => {
+          const meta = SLOT_META[slotName];
+          const value = selInfo.slots[slotName];
+          const blk = value ? BLOCKS[slotName][value] : null;
+          const SlotIcon = slotName === "yoga" ? Flower2 : Dumbbell;
+          const isEditing = p.editingBlock === slotName;
+          const isMovingThis = p.moveSource && p.moveSource.slot === slotName;
+          return (
+            <div key={slotName} style={{ borderColor: BORDER, borderLeftColor: meta.color }}
+                 className="border-t border-l-4 px-4 py-3">
+              <div className="flex items-center justify-between flex-wrap gap-y-1.5">
+                <div className="flex items-center gap-2 min-w-0">
+                  <SlotIcon size={14} style={{ color: meta.color }} className="shrink-0" />
+                  <p style={{ fontFamily: FONT_DISPLAY }} className="text-xs font-semibold truncate">
+                    {blk ? blk.label : `No ${meta.label.toLowerCase()}`}
+                  </p>
+                  {selInfo.moved[slotName] && (
+                    <span style={{ background: "rgba(169,155,201,0.16)", color: "#6D5F91", borderColor: "rgba(169,155,201,0.45)" }}
+                          className="text-[10px] px-1.5 py-0.5 rounded-full border font-medium shrink-0">Moved</span>
+                  )}
                 </div>
-              ))}
+                <div className="flex items-center gap-2.5 shrink-0">
+                  {value && (
+                    <button onClick={() => p.setMoveSource(isMovingThis ? null : { date: p.calSelected, slot: slotName })}
+                            style={{ color: meta.color }} className="text-[11px] font-semibold">
+                      ⇄ {isMovingThis ? "Cancel" : "Move"}
+                    </button>
+                  )}
+                  <button onClick={() => p.setEditingBlock(isEditing ? null : slotName)}
+                          style={{ color: TEXT_SECONDARY }} className="text-[11px] font-semibold">
+                    {value ? "Change" : "Add"}
+                  </button>
+                  {selInfo.moved[slotName] && (
+                    <button onClick={() => p.resetBlock(p.calSelected, slotName)} style={{ color: TEXT_MUTED }}
+                            className="text-[11px] font-semibold">Reset</button>
+                  )}
+                </div>
+              </div>
+
+              {isEditing && (
+                <div className="flex gap-1.5 flex-wrap mt-2">
+                  {SLOT_OPTIONS[slotName].map((opt) => (
+                    <button key={String(opt.value)}
+                            onClick={() => { p.setBlock(p.calSelected, slotName, opt.value); p.setEditingBlock(null); }}
+                            style={{ background: value === opt.value ? meta.color : "transparent",
+                                     color: value === opt.value ? "#fff" : TEXT_SECONDARY,
+                                     borderColor: value === opt.value ? meta.color : BORDER }}
+                            className="text-[11px] font-semibold px-2.5 py-1 rounded-lg border">
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {blk && (
+                <div className="space-y-1 mt-2">
+                  {blk.exercises.map((e) => (
+                    <div key={e.id} className="flex items-center justify-between gap-2">
+                      <span className="text-xs flex-1">{e.name}</span>
+                      <span style={{ fontFamily: FONT_MONO, color: TEXT_MUTED }} className="text-[11px] shrink-0">{e.presc}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
-          )}
-        </div>
+          );
+        })}
 
         <div style={{ borderColor: BORDER, borderLeftColor: CATS.activity.color }} className="border-t border-l-4 px-4 py-3">
           <div className="flex items-center gap-2 mb-2">
@@ -1270,12 +1295,9 @@ function ProgramView() {
         </p>
       </Section>
 
-      <Section title="Weekly yoga" subtitle="Sundays · 20–30 min" color={CATS.yoga.color}>
+      <Section title="Weekly yoga" subtitle="Sundays by default · move it from Calendar" color={CATS.yoga.color}>
         <p className="text-xs mb-2">Neck, shoulders and upper back — the same areas as the daily flow, with more time.</p>
-        <a href="https://www.youtube.com/watch?v=gnVIx5z9-Fk" target="_blank" rel="noopener noreferrer"
-           style={{ color: CATS.yoga.color }} className="text-xs font-semibold flex items-center gap-1">
-          Open the session <ExternalLink size={12} />
-        </a>
+        <ExerciseList exercises={BLOCKS.yoga.session.exercises} color={CATS.yoga.color} />
       </Section>
 
       <Section title="Walking" color={SAGE}>

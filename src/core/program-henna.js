@@ -32,7 +32,7 @@ export const APP_VERSION = "1.0.0";
 // One slot: strength. Walking is a daily check rather than a scheduled block,
 // because she chose walking as her only cardio and a step target already
 // covers it.
-export const SLOTS = ["strength"];
+export const SLOTS = ["strength", "yoga"];
 
 /* ------------------------------- Strength -------------------------------- */
 // sets/reps here are the week-3-onward targets. Weeks 1-2 run 2 sets — the
@@ -244,30 +244,61 @@ const NO_GYM = {
   ],
 };
 
-export const BLOCKS = {
-  strength: { a: DAY_A, b: DAY_B, c: DAY_C, nogym: NO_GYM },
+
+const YOGA = {
+  label: "Weekly Yoga",
+  cat: "yoga",
+  subtitle: "20–30 min · neck, shoulders, upper back",
+  exercises: [
+    {
+      id: "y1",
+      name: "Upper body yoga",
+      presc: "30 min",
+      detail: "Follow along with the video. Blocks under the hips or back wherever it helps.",
+      video: "https://www.youtube.com/watch?v=gnVIx5z9-Fk",
+      altName: "20 min version",
+      altVideo: "https://www.youtube.com/watch?v=IlplXfNE45U",
+      sets: null,
+    },
+  ],
 };
 
-export const STRENGTH_OPTIONS = [
-  { value: null, label: "Rest" },
-  { value: "a", label: "Day A" },
-  { value: "b", label: "Day B" },
-  { value: "c", label: "Day C" },
-  { value: "nogym", label: "No-Gym" },
-];
+export const BLOCKS = {
+  strength: { a: DAY_A, b: DAY_B, c: DAY_C, nogym: NO_GYM },
+  yoga: { session: YOGA },
+};
+
+export const SLOT_OPTIONS = {
+  strength: [
+    { value: null, label: "Rest" },
+    { value: "a", label: "Day A" },
+    { value: "b", label: "Day B" },
+    { value: "c", label: "Day C" },
+    { value: "nogym", label: "No-Gym" },
+  ],
+  yoga: [
+    { value: null, label: "None" },
+    { value: "session", label: "Yoga" },
+  ],
+};
+
+export const SLOT_META = {
+  strength: { label: "Strength", color: "#C97388" },
+  yoga: { label: "Yoga", color: "#A99BC9" },
+};
 
 /* ------------------------------- Schedule -------------------------------- */
 // Mon / Wed / Fri, non-consecutive. No A/B week alternation — she has no
 // rotating constraint, so both weeks are identical and the week-type control
 // stays hidden.
 const WEEK = {
-  1: { strength: "a" },
-  2: { strength: null },
-  3: { strength: "b" },
-  4: { strength: null },
-  5: { strength: "c" },
-  6: { strength: null },
-  0: { strength: null, note: "Rest day — the mobility flow still applies" },
+  1: { strength: "a", yoga: null },
+  2: { strength: null, yoga: null },
+  3: { strength: "b", yoga: null },
+  4: { strength: null, yoga: null },
+  5: { strength: "c", yoga: null },
+  6: { strength: null, yoga: null },
+  0: { strength: null, yoga: "session", note: "No strength today — yoga and the mobility flow" },
 };
 
 export const SCHEDULE = { A: WEEK, B: WEEK };
@@ -307,22 +338,6 @@ export const DAILY = [
       detail: m.detail || null,
       video: m.video,
     })),
-  },
-  {
-    key: "yoga",
-    cat: "yoga",
-    dayOfWeek: 0, // Sunday
-    title: "Weekly Yoga",
-    subtitle: "20–30 min · optional but recommended",
-    tasks: [
-      {
-        id: "y1",
-        name: "Upper body yoga",
-        presc: "30 min",
-        detail: "Neck, shoulders and upper back.",
-        video: "https://www.youtube.com/watch?v=gnVIx5z9-Fk",
-      },
-    ],
   },
   {
     key: "check",
