@@ -202,6 +202,7 @@ export function buildHistoryRows(log, overrides, program) {
         pct: total ? doneCount / total : 0,
         byCat,
         scales: rec.scales || {},
+        numbers: rec.numbers || {},
         isTrainingDay: info.isTrainingDay,
         gentler,
       };
@@ -209,19 +210,25 @@ export function buildHistoryRows(log, overrides, program) {
 }
 
 /**
- * Rolling average of a 1-5 scale (energy, symptoms). Henna tracks no weight
- * and no macros, so these ARE her trend lines — the daily value is noisy and
- * the average is the thing worth looking at.
+ * Rolling average of any tracked number.
+ *
+ * Two buckets, deliberately separate:
+ *   scales  — 1-5 subjective ratings (energy, symptoms)
+ *   numbers — measured values (bodyweight in kg, hours slept)
+ *
+ * Both are noisy day to day, so the average is the line worth watching. This
+ * is the same 7-day rolling average the original app applied to bodyweight,
+ * generalised so any client can point it at whatever they actually track.
  */
-export function computeScaleSeries(rows, scaleId, windowDays = 7) {
+export function computeSeries(rows, id, { bucket = "scales", windowDays = 7 } = {}) {
   const byDate = {};
   rows.forEach((r) => {
-    const v = r.scales?.[scaleId];
+    const v = r[bucket]?.[id];
     if (typeof v === "number") byDate[r.date] = v;
   });
 
   return rows
-    .filter((r) => typeof r.scales?.[scaleId] === "number")
+    .filter((r) => typeof r[bucket]?.[id] === "number")
     .map((r) => {
       let sum = 0;
       let count = 0;
@@ -237,7 +244,7 @@ export function computeScaleSeries(rows, scaleId, windowDays = 7) {
       return {
         date: r.date,
         label: r.dateObj.toLocaleDateString(undefined, { day: "numeric", month: "short" }),
-        value: r.scales[scaleId],
+        value: r[bucket][id],
         avg: count ? Math.round((sum / count) * 10) / 10 : null,
       };
     });
@@ -264,3 +271,8 @@ export function computeLoadSeries(log, exerciseId, excludeDate) {
 }
 
 export { getISOWeek, dateKey, daysBetween };
+
+/** @deprecated use computeSeries(rows, id, { bucket: "scales" }) */
+export function computeScaleSeries(rows, id, windowDays = 7) {
+  return computeSeries(rows, id, { bucket: "scales", windowDays });
+}

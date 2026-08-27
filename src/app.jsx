@@ -7,54 +7,31 @@ import {
   LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, ResponsiveContainer,
 } from "recharts";
 
-import PROGRAM, { APP_VERSION, MOBILITY, BLOCKS, SLOT_OPTIONS, SLOT_META } from "./core/program-henna.js";
+import {
+  PROGRAM, THEME, ProgramView, CLIENT_LABEL, STORAGE_PREFIX, BACKUP_URL,
+  START_DATE, RAMP_WEEKS, APP_VERSION, MOBILITY, BLOCKS, SLOT_OPTIONS, SLOT_META,
+} from "./config.jsx";
+
 import {
   resolveSchedule, buildSections, buildHistoryRows, isTaskDone, countableTasks,
-  computeScaleSeries, computeLoadSeries, dateKey, daysBetween, getISOWeek,
+  computeSeries, computeLoadSeries, dateKey, daysBetween, getISOWeek,
 } from "./core/engine.js";
 import { computeStreak, buildHeatmapCells } from "./core/stats.js";
 import { createStore, localStorageAdapter } from "./core/storage.js";
 
 /* --------------------------------- Config -------------------------------- */
 
-const START_DATE = new Date(2026, 7, 31); // Monday 31 August 2026
-const RAMP_WEEKS = 2; // first fortnight runs one set lighter
+const {
+  BG, CARD, BORDER, TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED,
+  ACCENT, ACCENT_2, HEAT_RGB, FONT_DISPLAY, FONT_BODY, FONT_MONO, FONT_IMPORT, CATS,
+} = THEME;
 
-// Set this once the Apps Script backup endpoint exists. Empty = feature off,
-// app works exactly the same, just without the cloud copy.
-const BACKUP_URL = "";
-
-const store = createStore(localStorageAdapter(), "ptAppHenna_");
-
-/* --------------------------------- Palette ------------------------------- */
-
-const BG = "#FBF7F4";
-const CARD = "#FFFFFF";
-const BORDER = "#EADFD8";
-const TEXT_PRIMARY = "#2E2724";
-const TEXT_SECONDARY = "#7A6A62";
-const TEXT_MUTED = "#A2938B";
-const ROSE = "#C97388";
-const SAGE = "#7FB88F";
-const HEAT_RGB = "201,115,136";
-
-const FONT_DISPLAY = "'Fraunces', Georgia, serif";
-const FONT_BODY = "'Karla', system-ui, sans-serif";
-const FONT_MONO = "'IBM Plex Mono', ui-monospace, monospace";
-
-const CATS = {
-  strength: { label: "Strength", color: ROSE, Icon: Dumbbell },
-  mobility: { label: "Mobility", color: SAGE, Icon: Wind },
-  yoga: { label: "Yoga", color: "#A99BC9", Icon: Flower2 },
-  check: { label: "Check", color: "#96877E", Icon: Heart },
-  rest: { label: "Rest", color: "#B8A99F", Icon: Heart },
-  activity: { label: "Activity", color: "#E0A458", Icon: Flame },
-};
+const store = createStore(localStorageAdapter(), STORAGE_PREFIX);
 
 function FontImport() {
   return (
     <style>{`
-      @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Karla:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap');
+      @import url('${FONT_IMPORT}');
       html, body, #root { background: ${BG}; min-height: 100%; }
       body { margin: 0; -webkit-tap-highlight-color: transparent; }
     `}</style>
@@ -185,6 +162,16 @@ export default function HennaApp() {
     persist((r) => ({ ...r, scales: { ...(r.scales || {}), [id]: value } }));
   }, [persist]);
 
+  const commitNumber = useCallback((id, raw) => {
+    persist((r) => {
+      const numbers = { ...(r.numbers || {}) };
+      const n = parseFloat(String(raw).trim().replace(",", "."));
+      if (raw !== "" && !isNaN(n)) numbers[id] = n;
+      else delete numbers[id];
+      return { ...r, numbers };
+    });
+  }, [persist]);
+
   const commitNotes = useCallback(() => {
     persist((r) => {
       const next = { ...r };
@@ -313,8 +300,6 @@ export default function HennaApp() {
   const trendRows = useMemo(() => historyRows.filter((r) => r.date !== todayKey), [historyRows, todayKey]);
   const streak = useMemo(() => computeStreak(historyRows), [historyRows]);
   const heatmap = useMemo(() => buildHeatmapCells(historyRows, 12), [historyRows]);
-  const energySeries = useMemo(() => computeScaleSeries(trendRows, "energy").slice(-45), [trendRows]);
-  const symptomSeries = useMemo(() => computeScaleSeries(trendRows, "symptoms").slice(-45), [trendRows]);
   const completionSeries = useMemo(
     () => trendRows.slice(-30).map((r) => ({
       label: r.dateObj.toLocaleDateString(undefined, { day: "numeric", month: "short" }),
@@ -440,9 +425,9 @@ export default function HennaApp() {
       <div className="px-4 pt-6 pb-4 max-w-md mx-auto">
         <div className="flex items-start justify-between">
           <div className="flex-1 min-w-0">
-            <p style={{ fontFamily: FONT_BODY, color: ROSE, letterSpacing: "0.16em" }}
+            <p style={{ fontFamily: FONT_BODY, color: ACCENT, letterSpacing: "0.16em" }}
                className="text-[10px] uppercase font-semibold">
-              Daily PT · Henna
+              {CLIENT_LABEL}
             </p>
             {view === "today" ? (
               <div className="flex items-center gap-1 mt-1 -ml-1.5">
@@ -465,7 +450,7 @@ export default function HennaApp() {
             )}
           </div>
           <button onClick={() => setSettingsOpen((v) => !v)} aria-label="Settings"
-                  style={{ borderColor: BORDER, color: settingsOpen ? ROSE : TEXT_MUTED, background: CARD }}
+                  style={{ borderColor: BORDER, color: settingsOpen ? ACCENT : TEXT_MUTED, background: CARD }}
                   className="mt-1 ml-2 shrink-0 rounded-full border p-2">
             <Settings2 size={16} />
           </button>
@@ -474,7 +459,7 @@ export default function HennaApp() {
         <div className="flex gap-1 p-1 rounded-xl border mt-3" style={{ borderColor: BORDER, background: CARD }}>
           {[["today", "Today"], ["calendar", "Calendar"], ["history", "Progress"], ["program", "Program"]].map(([k, label]) => (
             <button key={k} onClick={() => setView(k)}
-                    style={{ background: view === k ? ROSE : "transparent", color: view === k ? "#fff" : TEXT_SECONDARY }}
+                    style={{ background: view === k ? ACCENT : "transparent", color: view === k ? "#fff" : TEXT_SECONDARY }}
                     className="flex-1 text-[11px] font-semibold py-1.5 rounded-lg">
               {label}
             </button>
@@ -493,7 +478,7 @@ export default function HennaApp() {
               </div>
               <button onClick={() => updateSettings({ gentler: !settings.gentler })}
                       aria-pressed={settings.gentler} aria-label="Toggle gentler week"
-                      style={{ background: settings.gentler ? ROSE : BORDER }}
+                      style={{ background: settings.gentler ? ACCENT : BORDER }}
                       className="shrink-0 w-11 h-6 rounded-full relative transition-colors">
                 <span style={{ background: "#fff", left: settings.gentler ? 22 : 3 }}
                       className="absolute top-0.5 w-5 h-5 rounded-full transition-all shadow-sm" />
@@ -516,7 +501,7 @@ export default function HennaApp() {
                         style={{ fontFamily: FONT_MONO, background: BG, borderColor: BORDER }}
                         className="w-full text-[10px] p-2 rounded-lg border" />
               <div className="flex items-center justify-between mt-2">
-                <button onClick={importBackup} style={{ color: ROSE }} className="text-[11px] font-semibold">
+                <button onClick={importBackup} style={{ color: ACCENT }} className="text-[11px] font-semibold">
                   Restore from above
                 </button>
                 {importStatus && <span style={{ color: TEXT_MUTED }} className="text-[11px]">{importStatus}</span>}
@@ -536,7 +521,7 @@ export default function HennaApp() {
                 </span>
               )}
               {gentler && (
-                <span style={{ background: "rgba(201,115,136,0.14)", color: ROSE, borderColor: "rgba(201,115,136,0.4)" }}
+                <span style={{ background: "rgba(201,115,136,0.14)", color: ACCENT, borderColor: "rgba(201,115,136,0.4)" }}
                       className="text-[11px] px-2 py-0.5 rounded-full border font-medium">
                   Gentler week
                 </span>
@@ -548,7 +533,7 @@ export default function HennaApp() {
                 </span>
               )}
               {dayOffset !== 0 && (
-                <button onClick={() => setDayOffset(0)} style={{ color: ROSE }} className="text-[11px] font-semibold">
+                <button onClick={() => setDayOffset(0)} style={{ color: ACCENT }} className="text-[11px] font-semibold">
                   Back to today
                 </button>
               )}
@@ -559,8 +544,8 @@ export default function HennaApp() {
                 <svg width={size} height={size}>
                   <defs>
                     <linearGradient id="ring" x1="0%" y1="0%" x2="100%" y2="100%">
-                      <stop offset="0%" stopColor={ROSE} />
-                      <stop offset="100%" stopColor={SAGE} />
+                      <stop offset="0%" stopColor={ACCENT} />
+                      <stop offset="100%" stopColor={ACCENT_2} />
                     </linearGradient>
                   </defs>
                   <circle cx={size / 2} cy={size / 2} r={radius} fill="none" stroke={BORDER} strokeWidth={stroke} />
@@ -663,6 +648,34 @@ export default function HennaApp() {
                         );
                       }
 
+                      if (task.type === "number") {
+                        const value = rec?.numbers?.[task.id];
+                        const has = typeof value === "number";
+                        const draftKey = `num:${task.id}`;
+                        return (
+                          <div key={task.id} style={border} className="flex items-center gap-3 px-4 py-3">
+                            <span style={{ background: has ? cat.color : "transparent", borderColor: has ? cat.color : BORDER }}
+                                  className="shrink-0 w-5 h-5 rounded-full border-2 flex items-center justify-center">
+                              {has && <Check size={12} strokeWidth={3} color="#fff" />}
+                            </span>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium">{task.name}</p>
+                              <p style={{ fontFamily: FONT_MONO, color: TEXT_MUTED }} className="text-[11px] mt-0.5">{task.presc}</p>
+                            </div>
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <input type="text" inputMode="decimal" aria-label={`${task.name}, ${task.unit}`}
+                                     placeholder={task.unit}
+                                     value={loadDrafts[draftKey] ?? (has ? String(value) : "")}
+                                     onChange={(e) => setLoadDrafts((p2) => ({ ...p2, [draftKey]: e.target.value }))}
+                                     onBlur={(e) => commitNumber(task.id, e.target.value)}
+                                     onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+                                     style={{ fontFamily: FONT_MONO, borderColor: BORDER, background: BG, color: TEXT_PRIMARY }}
+                                     className="w-16 text-right text-sm px-2 py-1 rounded-md border" />
+                              <span style={{ color: TEXT_MUTED }} className="text-xs">{task.unit}</span>
+                            </div>
+                          </div>
+                        );
+                      }
                       if (task.type === "notes") {
                         return (
                           <div key={task.id} style={border} className="px-4 py-3">
@@ -733,7 +746,7 @@ export default function HennaApp() {
                                 return (
                                   <>
                                     {lastNote && (
-                                      <p style={{ background: "rgba(201,115,136,0.1)", color: ROSE, borderColor: "rgba(201,115,136,0.3)" }}
+                                      <p style={{ background: "rgba(201,115,136,0.1)", color: ACCENT, borderColor: "rgba(201,115,136,0.3)" }}
                                          className="text-[11px] px-2 py-1 rounded-md border">📌 {lastNote}</p>
                                     )}
                                     {last && (
@@ -851,14 +864,10 @@ export default function HennaApp() {
                 ))}
               </div>
 
-              {energySeries.length > 0 && (
-                <ChartCard title="Energy" note="Dots: each day. Line: 7-day average — that's the one to watch."
-                           data={energySeries} color={SAGE} domain={[1, 5]} unit="/5" />
-              )}
-              {symptomSeries.length > 0 && (
-                <ChartCard title="Hands / wrists / elbows" note="Lower is better. Watch how this moves against your cycle and your training."
-                           data={symptomSeries} color={ROSE} domain={[1, 5]} unit="/5" />
-              )}
+              {trackedCharts.map((c) => (
+                <ChartCard key={c.id} title={c.title} note={c.note} data={c.data}
+                           color={c.color} domain={c.domain} unit={c.unit} />
+              ))}
 
               {(
                 <div style={{ background: CARD, borderColor: BORDER }} className="rounded-2xl border p-4">
@@ -879,7 +888,7 @@ export default function HennaApp() {
                           <YAxis domain={["dataMin - 2", "dataMax + 2"]} tick={{ fill: TEXT_MUTED, fontSize: 10 }} axisLine={false} tickLine={false} width={32} />
                           <Tooltip contentStyle={{ background: CARD, border: `1px solid ${BORDER}`, borderRadius: 8, fontFamily: FONT_MONO, fontSize: 11 }}
                                    formatter={(v) => [`${v} kg`, "Heaviest set"]} />
-                          <Line type="monotone" dataKey="maxWeight" stroke={ROSE} strokeWidth={2.5} dot={{ r: 2, fill: ROSE }} />
+                          <Line type="monotone" dataKey="maxWeight" stroke={ACCENT} strokeWidth={2.5} dot={{ r: 2, fill: ACCENT }} />
                         </LineChart>
                       </ResponsiveContainer>
                     </div>
@@ -904,7 +913,7 @@ export default function HennaApp() {
                         <YAxis domain={[0, 100]} tick={{ fill: TEXT_MUTED, fontSize: 10 }} axisLine={false} tickLine={false} width={30} />
                         <Tooltip contentStyle={{ background: CARD, border: `1px solid ${BORDER}`, borderRadius: 8, fontFamily: FONT_MONO, fontSize: 11 }}
                                  formatter={(v) => [`${v}%`, "Complete"]} />
-                        <Line type="monotone" dataKey="pct" stroke={SAGE} strokeWidth={2.5} dot={false} />
+                        <Line type="monotone" dataKey="pct" stroke={ACCENT_2} strokeWidth={2.5} dot={false} />
                       </LineChart>
                     </ResponsiveContainer>
                   </div>
@@ -932,7 +941,7 @@ export default function HennaApp() {
       )}
 
       {/* ------------------------------- Program ------------------------------ */}
-      {view === "program" && <ProgramView />}
+      {view === "program" && <ProgramView Section={Section} ExerciseList={ExerciseList} theme={THEME} />}
     </div>
   );
 }
@@ -1014,7 +1023,7 @@ function CalendarView(p) {
         </button>
         <div className="flex items-center gap-2">
           <h2 style={{ fontFamily: FONT_DISPLAY }} className="text-base font-semibold">{monthLabel}</h2>
-          <button onClick={() => pick(p.today)} style={{ color: ROSE }} className="text-[11px] font-semibold">Today</button>
+          <button onClick={() => pick(p.today)} style={{ color: ACCENT }} className="text-[11px] font-semibold">Today</button>
         </div>
         <button onClick={() => go(1)} aria-label="Next month" style={{ borderColor: BORDER, color: TEXT_SECONDARY, background: CARD }} className="rounded-full border p-2">
           <ChevronRight size={16} />
@@ -1022,9 +1031,9 @@ function CalendarView(p) {
       </div>
 
       {p.moveSource && (
-        <div style={{ background: "rgba(201,115,136,0.1)", borderColor: ROSE }} className="flex items-center justify-between gap-2 rounded-xl border px-3 py-2 mb-3">
+        <div style={{ background: "rgba(201,115,136,0.1)", borderColor: ACCENT }} className="flex items-center justify-between gap-2 rounded-xl border px-3 py-2 mb-3">
           <p className="text-xs">Moving {SLOT_META[p.moveSource.slot].label.toLowerCase()} — tap the day to swap it with.</p>
-          <button onClick={() => p.setMoveSource(null)} style={{ color: ROSE }} className="text-xs font-semibold shrink-0">Cancel</button>
+          <button onClick={() => p.setMoveSource(null)} style={{ color: ACCENT }} className="text-xs font-semibold shrink-0">Cancel</button>
         </div>
       )}
 
@@ -1045,13 +1054,13 @@ function CalendarView(p) {
               return (
                 <button key={dateKey(d)} onClick={() => pick(d)}
                         style={{ background: isSel ? "rgba(201,115,136,0.12)" : CARD,
-                                 borderColor: isToday ? ROSE : BORDER,
+                                 borderColor: isToday ? ACCENT : BORDER,
                                  borderWidth: isToday ? 2 : 1,
                                  borderStyle: i.anyMoved ? "dashed" : "solid" }}
                         className="aspect-square rounded-lg border flex flex-col items-center justify-center gap-0.5">
                   <span style={{ fontFamily: FONT_MONO, color: inMonth ? TEXT_PRIMARY : TEXT_MUTED }} className="text-xs">{d.getDate()}</span>
                   <span className="flex gap-0.5 h-1.5">
-                    {i.slots.strength && <span style={{ background: ROSE }} className="w-1.5 h-1.5 rounded-full" />}
+                    {i.slots.strength && <span style={{ background: ACCENT }} className="w-1.5 h-1.5 rounded-full" />}
                     {i.activities.length > 0 && <span style={{ background: CATS.activity.color }} className="w-1.5 h-1.5 rounded-full" />}
                     {i.slots.yoga && <span style={{ background: CATS.yoga.color }} className="w-1.5 h-1.5 rounded-full" />}
                   </span>
@@ -1063,7 +1072,7 @@ function CalendarView(p) {
       </div>
 
       <div className="flex items-center gap-3 mt-3 flex-wrap">
-        {[["Strength", ROSE], ["Yoga", CATS.yoga.color], ["Activity", CATS.activity.color]].map(([l, c]) => (
+        {[["Strength", ACCENT], ["Yoga", CATS.yoga.color], ["Activity", CATS.activity.color]].map(([l, c]) => (
           <span key={l} className="flex items-center gap-1.5 text-[11px]" style={{ color: TEXT_SECONDARY }}>
             <span style={{ background: c }} className="w-2 h-2 rounded-full" />{l}
           </span>
@@ -1207,113 +1216,6 @@ function ExerciseList({ exercises, color }) {
           )}
         </div>
       ))}
-    </div>
-  );
-}
-
-function ProgramView() {
-  return (
-    <div className="px-4 max-w-md mx-auto space-y-3">
-      <Section title="Your goals" color={ROSE} defaultOpen>
-        <div className="space-y-2 text-xs">
-          <p><strong>Strength and toning</strong> — and what you said it's really for: <strong>more energy</strong>.</p>
-          <p style={{ color: TEXT_SECONDARY }}>
-            That's why the app asks about your energy every day. It's the thing we're actually trying to change, so
-            it's the thing worth measuring.
-          </p>
-        </div>
-      </Section>
-
-      <Section title="The week" subtitle="3 sessions · 30–45 min each" color={ROSE}>
-        <div className="space-y-1 text-xs">
-          {[["Mon", "Day A"], ["Tue", "Walk"], ["Wed", "Day B"], ["Thu", "Walk"], ["Fri", "Day C"], ["Sat", "Rest"], ["Sun", "Yoga"]].map(([d, s]) => (
-            <div key={d} className="flex items-center justify-between">
-              <span style={{ fontFamily: FONT_MONO, color: TEXT_SECONDARY, width: 46 }} className="shrink-0">{d}</span>
-              <span className="flex-1">{s}</span>
-            </div>
-          ))}
-        </div>
-        <p style={{ color: TEXT_MUTED }} className="text-xs">
-          Plus the mobility flow every day, and 10,000 steps. Walking days are flexible — move them around your week.
-        </p>
-      </Section>
-
-      {["a", "b", "c"].map((k) => (
-        <Section key={k} title={BLOCKS.strength[k].label} color={ROSE}>
-          <ExerciseList exercises={BLOCKS.strength[k].exercises} color={ROSE} />
-        </Section>
-      ))}
-
-      <Section title="How to get stronger" subtitle="Reps first, weight last" color={ROSE}>
-        <div className="text-xs space-y-2">
-          <p>Pick a weight where the last rep feels like you had 2–3 more in you. Then climb, in this order:</p>
-          <ol style={{ color: TEXT_SECONDARY }} className="list-decimal ml-4 space-y-1">
-            <li>Add a rep, until every set is at the top of its range</li>
-            <li>Slow it down — 3 seconds lowering</li>
-            <li>Go single-leg or single-arm</li>
-            <li><em>Then</em> add weight, and drop back to the bottom of the range</li>
-          </ol>
-          <p style={{ color: TEXT_MUTED }}>
-            Three steps before the weight changes. Your jumps are big — 6 kg to 8 kg is a third heavier — so this
-            gives your joints time to catch up with your muscles.
-          </p>
-        </div>
-      </Section>
-
-      <Section title="Your hands" subtitle="Why the program looks the way it does" color={ROSE}>
-        <div className="text-xs space-y-2">
-          <p>
-            Your grip will often tire before the muscle you're training does. That's not weakness — it's just where
-            your RA sits. So the program routes around it:
-          </p>
-          <ul style={{ color: TEXT_SECONDARY }} className="list-disc ml-4 space-y-1">
-            <li>Kettlebells at the chest rather than hanging from one hand</li>
-            <li>Ankle weights for single-leg work — no hands involved at all</li>
-            <li>A band alternative on every pull and press</li>
-            <li>Planks on forearms, push-ups on a raised surface</li>
-          </ul>
-          <p style={{ color: TEXT_MUTED }}>
-            On days your hands are sore, take the easier option and log it. That's the app working as intended, not a
-            missed session.
-          </p>
-        </div>
-      </Section>
-
-      <Section title="Gentler weeks" color={SAGE}>
-        <p className="text-xs">
-          You told John things feel more sensitive around your cycle. The switch in Settings trims every session —
-          one less set, lighter, bottom of the rep range. Use it whenever you want it. Training through a rough patch
-          at 70% beats skipping the week entirely.
-        </p>
-      </Section>
-
-      <Section title="Daily mobility" subtitle="~12 min · neck, upper back, rotation" color={SAGE}>
-        <ExerciseList exercises={MOBILITY} color={SAGE} />
-        <p style={{ color: TEXT_MUTED }} className="text-xs">
-          Built around a desk day: opening the upper back, and rotation from three different positions. The breathing
-          at the end counts as your meditation.
-        </p>
-      </Section>
-
-      <Section title="Weekly yoga" subtitle="Sundays by default · move it from Calendar" color={CATS.yoga.color}>
-        <p className="text-xs mb-2">Neck, shoulders and upper back — the same areas as the daily flow, with more time.</p>
-        <ExerciseList exercises={BLOCKS.yoga.session.exercises} color={CATS.yoga.color} />
-      </Section>
-
-      <Section title="Walking" color={SAGE}>
-        <div className="text-xs space-y-2">
-          <p>2–3 times a week, 20–40 minutes on the treadmill, plus 10,000 steps a day.</p>
-          <p style={{ color: TEXT_SECONDARY }}>
-            No heart-rate numbers — just how it feels:
-          </p>
-          <ul style={{ color: TEXT_SECONDARY }} className="list-disc ml-4 space-y-1">
-            <li><strong>Easy</strong> — you could hold a conversation</li>
-            <li><strong>Brisk</strong> — short sentences only. This is the useful one.</li>
-            <li><strong>Hard</strong> — a few words at a time. Optional.</li>
-          </ul>
-          <p style={{ color: TEXT_MUTED }}>When brisk gets easy, add incline before you add speed.</p>
-        </div>
-      </Section>
     </div>
   );
 }
