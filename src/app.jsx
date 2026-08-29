@@ -1,20 +1,21 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import {
   Dumbbell, Wind, Flower2, Check, ExternalLink, ChevronDown, ChevronLeft,
-  ChevronRight, Settings2, Flame, CalendarDays, Repeat, X, Heart,
+  ChevronRight, Settings2, Flame, CalendarDays, Repeat, X, Heart, Ban,
 } from "lucide-react";
 import {
-  LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, ResponsiveContainer,
+  LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, ResponsiveContainer, ReferenceLine,
 } from "recharts";
 
 import {
-  PROGRAM, THEME, ProgramView, CLIENT_LABEL, STORAGE_PREFIX, BACKUP_URL,
+  PROGRAM, THEME, ProgramView, CLIENT_LABEL, CLIENT_NAME, STORAGE_PREFIX, BACKUP_URL,
   START_DATE, RAMP_WEEKS, APP_VERSION, MOBILITY, BLOCKS, SLOT_OPTIONS, SLOT_META,
 } from "./config.jsx";
 
 import {
   resolveSchedule, buildSections, buildHistoryRows, isTaskDone, countableTasks,
-  computeSeries, computeLoadSeries, dateKey, daysBetween, getISOWeek,
+  computeSeries, computeRollingTotal, computeLoadSeries, targetMet,
+  suggestDeloadWeek, resolveTesting, SKIP_REASONS, dateKey, daysBetween, getISOWeek,
 } from "./core/engine.js";
 import { computeStreak, buildHeatmapCells } from "./core/stats.js";
 import { createStore, localStorageAdapter } from "./core/storage.js";
@@ -27,6 +28,10 @@ const {
 } = THEME;
 
 const store = createStore(localStorageAdapter(), STORAGE_PREFIX);
+
+// Green tick for a target that was met. Falls back to the mobility colour so
+// a theme that has not defined an explicit "ok" colour still looks right.
+const OK_COLOR = (CATS.mobility && CATS.mobility.color) || "#7FB88F";
 
 function FontImport() {
   return (
@@ -61,7 +66,7 @@ export default function HennaApp() {
   const [loading, setLoading] = useState(true);
   const [log, setLog] = useState({});
   const [overrides, setOverrides] = useState({});
-  const [settings, setSettings] = useState({ gentler: false });
+  const [settings, setSettings] = useState({ gentler: false, hrMax: null });
   const [view, setView] = useState("today");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [dayOffset, setDayOffset] = useState(0);
@@ -72,6 +77,7 @@ export default function HennaApp() {
   const [notesDraft, setNotesDraft] = useState("");
   const [editingNote, setEditingNote] = useState(null);
   const [exNoteDrafts, setExNoteDrafts] = useState({});
+  const [hrMaxDraft, setHrMaxDraft] = useState("");
 
   const [calYear, setCalYear] = useState(today.getFullYear());
   const [calMonth, setCalMonth] = useState(today.getMonth());
@@ -93,12 +99,13 @@ export default function HennaApp() {
       const [l, ov, s] = await Promise.all([
         store.loadJSON("log", {}),
         store.loadJSON("overrides", {}),
-        store.loadJSON("settings", { gentler: false }),
+        store.loadJSON("settings", { gentler: false, hrMax: null }),
       ]);
       if (cancelled) return;
       setLog(l);
       setOverrides(ov);
       setSettings(s);
+      setHrMaxDraft(s.hrMax != null ? String(s.hrMax) : "");
       setLoading(false);
     })();
     return () => { cancelled = true; };
@@ -112,7 +119,13 @@ export default function HennaApp() {
   const viewedKey = dateKey(viewedDate);
   const rec = log[viewedKey];
   const ramp = isRampWeek(viewedDate);
-  const gentler = typeof rec?.gentler === "boolean" ? rec.gentler : settings.gentler;
+  // Precedence: the weekly D toggle (an override) beats the day's stored
+  // flag, which beats the app-wide setting. The 4th-week wave only SUGGESTS.
+  const dayOverrideDeload = overrides[viewedKey]?.deload;
+  const gentler =
+    typeof dayOverrideDeload === "boolean" ? dayOverrideDeload
+    : typeof rec?.gentler === "boolean" ? rec.gentler
+    : settings.gentler;
 
   /* ------------------------ Reset drafts on day change -------------------- */
 
@@ -155,6 +168,26 @@ export default function HennaApp() {
       const done = { ...r.done };
       ids.forEach((id) => { done[id] = value; });
       return { ...r, done };
+    });
+  }, [persist]);
+
+  /**
+   * A choice task stores the picked option, and optionally a paired count.
+   * Picking the "zero" option (e.g. Alcohol -> None) writes 0 to the count in
+   * the same tap: a dry day should cost one press, not a typed zero, or the
+   * logging habit quietly dies.
+   */
+  const setChoice = useCallback((task, value) => {
+    persist((r) => {
+      const choices = { ...(r.choices || {}), [task.id]: value };
+      const next = { ...r, choices };
+      if (task.countId) {
+        const numbers = { ...(r.numbers || {}) };
+        if (task.zeroOption && value === task.zeroOption) numbers[task.countId] = 0;
+        else if (numbers[task.countId] === 0) delete numbers[task.countId];
+        next.numbers = numbers;
+      }
+      return next;
     });
   }, [persist]);
 
@@ -256,6 +289,50 @@ export default function HennaApp() {
     }));
   }, [overrides, writeOverrides]);
 
+  /**
+   * Sick / travel / injured. Stored in overrides so one flag clears the day
+   * everywhere at once — Today, the Calendar, and every past-day figure that
+   * buildHistoryRows recomputes. Nothing is deleted: unset it and the day
+   * returns exactly as it was.
+   */
+  const setSkip = useCallback((d, reason) => {
+    const key = dateKey(d);
+    writeOverrides((prev) => {
+      const day = { ...(prev[key] || {}) };
+      if (reason) day.skip = reason;
+      else delete day.skip;
+      const next = { ...prev };
+      if (Object.keys(day).length === 0) delete next[key];
+      else next[key] = day;
+      return next;
+    });
+  }, [writeOverrides]);
+
+  /** The weekly deload toggle writes the flag to all 7 days of that week. */
+  const setWeekDeload = useCallback((weekMonday, value) => {
+    writeOverrides((prev) => {
+      const next = { ...prev };
+      for (let i = 0; i < 7; i++) {
+        const d = new Date(weekMonday);
+        d.setDate(d.getDate() + i);
+        const key = dateKey(d);
+        if (value) next[key] = { ...(next[key] || {}), deload: true };
+        else {
+          const day = { ...(next[key] || {}) };
+          delete day.deload;
+          if (Object.keys(day).length === 0) delete next[key];
+          else next[key] = day;
+        }
+      }
+      return next;
+    });
+  }, [writeOverrides]);
+
+  const commitHrMax = useCallback(() => {
+    const n = parseInt(hrMaxDraft.trim(), 10);
+    updateSettings({ hrMax: hrMaxDraft.trim() !== "" && !isNaN(n) && n > 0 ? n : null });
+  }, [hrMaxDraft, updateSettings]);
+
   const addActivity = useCallback((d, name) => {
     const t = name.trim();
     if (!t) return;
@@ -284,8 +361,12 @@ export default function HennaApp() {
   /* -------------------------------- Derived ------------------------------- */
 
   const sections = useMemo(
-    () => buildSections(viewedDate, { weekType: "A", gentler, overrides }, PROGRAM),
-    [viewedDate, gentler, overrides]
+    () => buildSections(
+      viewedDate,
+      { weekType: "auto", gentler, overrides, hrMax: settings.hrMax, record: rec },
+      PROGRAM
+    ),
+    [viewedDate, gentler, overrides, settings.hrMax, rec]
   );
   const info = useMemo(
     () => resolveSchedule(viewedDate, "auto", overrides, PROGRAM),
@@ -339,6 +420,77 @@ export default function HennaApp() {
     [log, selectedExerciseId, todayKey]
   );
 
+  /**
+   * Every chart in Progress, built from PROGRAM.tracking. Purely declarative:
+   * a client tracks something by listing it in their program file, and the
+   * chart appears. Nothing here knows what a "bodyweight" or a "unit" is.
+   *
+   * Three kinds:
+   *   scales  1-5 ratings   -> value + rolling average, fixed axis
+   *   numbers measurements  -> value + rolling average, auto axis
+   *           ...unless rollingTotal is set, in which case the WEEKLY TOTAL is
+   *           the meaningful figure (alcohol), not the daily average
+   *   rates   yes/no habits -> rolling hit-rate as a percentage
+   */
+  const trackedCharts = useMemo(() => {
+    const t = PROGRAM.tracking || {};
+    const out = [];
+    const recent = (arr) => arr.slice(-60);
+
+    for (const spec of t.scales || []) {
+      const cfg = typeof spec === "string" ? { id: spec, label: spec } : spec;
+      const data = recent(computeSeries(trendRows, cfg.id, { bucket: "scales", windowDays: cfg.rolling || 7 }));
+      if (data.length) {
+        out.push({
+          id: cfg.id, title: cfg.label, data, unit: "",
+          color: (CATS[cfg.cat] && CATS[cfg.cat].color) || ACCENT_2,
+          domain: [1, cfg.max || 5],
+          note: `Grey dots are each day. The line is the ${cfg.rolling || 7}-day average — that is the one to read.`,
+        });
+      }
+    }
+
+    for (const cfg of t.numbers || []) {
+      if (cfg.chart === false) continue;
+      if (cfg.rollingTotal) {
+        const data = recent(computeRollingTotal(trendRows, cfg.id, { windowDays: cfg.rollingTotal }));
+        if (data.some((d) => d.value > 0)) {
+          out.push({
+            id: cfg.id, title: cfg.label, data, unit: cfg.unit ? ` ${cfg.unit}` : "",
+            color: (CATS[cfg.cat] && CATS[cfg.cat].color) || ACCENT,
+            kind: "total", totalWindow: cfg.rollingTotal,
+            reference: cfg.reference, referenceLabel: cfg.referenceLabel,
+            note: `Grey dots are each day. The line is the running ${cfg.rollingTotal}-day total — the figure worth watching.`,
+          });
+        }
+        continue;
+      }
+      const data = recent(computeSeries(trendRows, cfg.id, { bucket: "numbers", windowDays: cfg.rolling || 7 }));
+      if (data.length) {
+        out.push({
+          id: cfg.id, title: cfg.label, data, unit: cfg.unit ? ` ${cfg.unit}` : "",
+          color: (CATS[cfg.cat] && CATS[cfg.cat].color) || ACCENT,
+          domain: ["dataMin - 1", "dataMax + 1"],
+          note: `Grey dots are each day. The line is the ${cfg.rolling || 7}-day average — that is the one to read.`,
+        });
+      }
+    }
+
+    for (const cfg of t.rates || []) {
+      const data = recent(computeSeries(trendRows, cfg.id, { bucket: "done", windowDays: cfg.rolling || 7 }));
+      if (data.length) {
+        out.push({
+          id: cfg.id, title: cfg.label, data, unit: "%", hideValue: true,
+          color: (CATS[cfg.cat] && CATS[cfg.cat].color) || CATS.check.color,
+          domain: [0, 100],
+          note: `How often you hit this over a rolling ${cfg.rolling || 7} days — smooths out day-to-day noise.`,
+        });
+      }
+    }
+
+    return out;
+  }, [trendRows]);
+
   const lastLoads = useMemo(() => {
     const out = {};
     Object.keys(log).sort().forEach((dstr) => {
@@ -389,10 +541,10 @@ export default function HennaApp() {
       if (!parsed || typeof parsed !== "object") throw new Error("bad");
       setLog(parsed.log || {});
       setOverrides(parsed.overrides || {});
-      setSettings(parsed.settings || { gentler: false });
+      setSettings(parsed.settings || { gentler: false, hrMax: null });
       store.saveJSON("log", parsed.log || {});
       store.saveJSON("overrides", parsed.overrides || {});
-      store.saveJSON("settings", parsed.settings || { gentler: false });
+      store.saveJSON("settings", parsed.settings || { gentler: false, hrMax: null });
       setImportStatus("Restored");
     } catch {
       setImportStatus("Couldn't read that — check it's a full backup");
@@ -485,6 +637,23 @@ export default function HennaApp() {
               </button>
             </div>
 
+            {PROGRAM.usesHeartRate && (
+              <div style={{ borderColor: BORDER }} className="border-t pt-4">
+                <p className="text-xs font-semibold mb-1">Max heart rate</p>
+                <p style={{ color: TEXT_MUTED }} className="text-[11px] mb-2">
+                  Turns the percentage zones on cardio days into actual numbers, e.g. "90–95% HRmax (158–166 bpm)".
+                </p>
+                <div className="flex items-center gap-1.5">
+                  <input type="text" inputMode="numeric" value={hrMaxDraft} placeholder="e.g. 175"
+                         onChange={(e) => setHrMaxDraft(e.target.value)} onBlur={commitHrMax}
+                         onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+                         style={{ fontFamily: FONT_MONO, borderColor: BORDER, background: BG, color: TEXT_PRIMARY }}
+                         className="w-20 text-sm px-2.5 py-1.5 rounded-lg border" />
+                  <span style={{ color: TEXT_MUTED }} className="text-xs">bpm</span>
+                </div>
+              </div>
+            )}
+
             <div style={{ borderColor: BORDER }} className="border-t pt-4">
               <p className="text-xs font-semibold mb-1">Backup</p>
               <p style={{ color: TEXT_MUTED }} className="text-[11px] mb-2">
@@ -513,7 +682,41 @@ export default function HennaApp() {
 
         {view === "today" && (
           <>
+            {/* Sick / travel / injured. One tap clears the day's training
+                everywhere; tapping the active reason again restores it. */}
+            <div className="flex items-center gap-1.5 mt-3 flex-wrap">
+              <span style={{ color: TEXT_MUTED }} className="text-[11px] mr-0.5">Skip day:</span>
+              {SKIP_REASONS.map((r) => {
+                const on = info.skip === r.value;
+                return (
+                  <button key={r.value}
+                          onClick={() => setSkip(viewedDate, on ? null : r.value)}
+                          aria-pressed={on}
+                          style={{
+                            background: on ? CATS.check.color : "transparent",
+                            color: on ? "#fff" : TEXT_SECONDARY,
+                            borderColor: on ? CATS.check.color : BORDER,
+                          }}
+                          className="text-[11px] font-semibold px-2.5 py-1 rounded-lg border">
+                    {r.label}
+                  </button>
+                );
+              })}
+              {info.skip && (
+                <button onClick={() => setSkip(viewedDate, null)} style={{ color: ACCENT }}
+                        className="text-[11px] font-semibold ml-0.5">
+                  Clear
+                </button>
+              )}
+            </div>
+
             <div className="flex items-center gap-2 mt-3 flex-wrap">
+              {info.skip && (
+                <span style={{ background: "rgba(136,145,163,0.16)", color: CATS.check.color, borderColor: "rgba(136,145,163,0.45)" }}
+                      className="text-[11px] px-2 py-0.5 rounded-full border font-medium flex items-center gap-1">
+                  <Ban size={11} /> {info.skipLabel} day
+                </span>
+              )}
               {ramp && (
                 <span style={{ background: "rgba(127,184,143,0.16)", color: "#4C7A5A", borderColor: "rgba(127,184,143,0.45)" }}
                       className="text-[11px] px-2 py-0.5 rounded-full border font-medium">
@@ -648,19 +851,81 @@ export default function HennaApp() {
                         );
                       }
 
+                      if (task.type === "choice") {
+                        const picked = rec?.choices?.[task.id];
+                        const has = typeof picked === "string";
+                        const isZero = has && task.zeroOption && picked === task.zeroOption;
+                        const countKey = `num:${task.countId}`;
+                        const countVal = task.countId ? rec?.numbers?.[task.countId] : null;
+                        return (
+                          <div key={task.id} style={border} className="px-4 py-3">
+                            <div className="flex items-center gap-3">
+                              <span style={{ background: has ? cat.color : "transparent", borderColor: has ? cat.color : BORDER }}
+                                    className="shrink-0 w-5 h-5 rounded-full border-2 flex items-center justify-center">
+                                {has && <Check size={12} strokeWidth={3} color="#fff" />}
+                              </span>
+                              <div className="min-w-0">
+                                <p className="text-sm font-medium">{task.name}</p>
+                                <p style={{ color: TEXT_MUTED }} className="text-[11px]">{task.presc}</p>
+                              </div>
+                            </div>
+                            <div className="flex gap-1.5 mt-2 ml-8 flex-wrap">
+                              {task.options.map((opt) => (
+                                <button key={opt.value}
+                                        onClick={() => setChoice(task, picked === opt.value ? null : opt.value)}
+                                        style={{
+                                          background: picked === opt.value ? cat.color : "transparent",
+                                          color: picked === opt.value ? "#fff" : TEXT_SECONDARY,
+                                          borderColor: picked === opt.value ? cat.color : BORDER,
+                                        }}
+                                        className="text-xs font-semibold px-3 py-1.5 rounded-lg border">
+                                  {opt.label}
+                                </button>
+                              ))}
+                            </div>
+                            {has && !isZero && task.countId && (
+                              <div className="flex items-center gap-1.5 mt-2 ml-8">
+                                <span style={{ color: TEXT_MUTED }} className="text-[11px]">
+                                  {task.countLabel || "How many?"}
+                                </span>
+                                <input type="text" inputMode="decimal"
+                                       aria-label={`${task.name}, ${task.countUnit || ""}`}
+                                       placeholder={task.countUnit || ""}
+                                       value={loadDrafts[countKey] ?? (typeof countVal === "number" ? String(countVal) : "")}
+                                       onChange={(e) => setLoadDrafts((p2) => ({ ...p2, [countKey]: e.target.value }))}
+                                       onBlur={(e) => commitNumber(task.countId, e.target.value)}
+                                       onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+                                       style={{ fontFamily: FONT_MONO, borderColor: BORDER, background: BG, color: TEXT_PRIMARY }}
+                                       className="w-14 text-right text-sm px-2 py-1 rounded-md border" />
+                                <span style={{ color: TEXT_MUTED }} className="text-xs">{task.countUnit}</span>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      }
+
                       if (task.type === "number") {
                         const value = rec?.numbers?.[task.id];
                         const has = typeof value === "number";
                         const draftKey = `num:${task.id}`;
+                        // Targets colour the tick: green when met, category
+                        // colour when logged but missed. No target = neutral.
+                        const met = targetMet(task, rec);
+                        const dotColor = met === true ? OK_COLOR : cat.color;
+                        const diff = has && task.target != null ? Math.round(value - task.target) : null;
                         return (
                           <div key={task.id} style={border} className="flex items-center gap-3 px-4 py-3">
-                            <span style={{ background: has ? cat.color : "transparent", borderColor: has ? cat.color : BORDER }}
+                            <span style={{ background: has ? dotColor : "transparent", borderColor: has ? dotColor : BORDER }}
                                   className="shrink-0 w-5 h-5 rounded-full border-2 flex items-center justify-center">
                               {has && <Check size={12} strokeWidth={3} color="#fff" />}
                             </span>
                             <div className="flex-1 min-w-0">
                               <p className="text-sm font-medium">{task.name}</p>
-                              <p style={{ fontFamily: FONT_MONO, color: TEXT_MUTED }} className="text-[11px] mt-0.5">{task.presc}</p>
+                              <p style={{ fontFamily: FONT_MONO, color: met === false ? cat.color : TEXT_MUTED }}
+                                 className="text-[11px] mt-0.5">
+                                {task.presc}
+                                {diff != null && ` · ${diff > 0 ? "+" : ""}${diff}`}
+                              </p>
                             </div>
                             <div className="flex items-center gap-1.5 shrink-0">
                               <input type="text" inputMode="decimal" aria-label={`${task.name}, ${task.unit}`}
@@ -838,7 +1103,8 @@ export default function HennaApp() {
         <CalendarView
           {...{ calYear, calMonth, setCalYear, setCalMonth, calSelected, setCalSelected, overrides,
                 todayKey, today, moveSource, setMoveSource, swapBlock, setBlock, resetBlock,
-                editingBlock, setEditingBlock, activityDraft, setActivityDraft, addActivity, removeActivity }}
+                editingBlock, setEditingBlock, activityDraft, setActivityDraft, addActivity, removeActivity,
+                setSkip, setWeekDeload }}
         />
       )}
 
@@ -865,8 +1131,7 @@ export default function HennaApp() {
               </div>
 
               {trackedCharts.map((c) => (
-                <ChartCard key={c.id} title={c.title} note={c.note} data={c.data}
-                           color={c.color} domain={c.domain} unit={c.unit} />
+                <ChartCard key={c.id} {...c} />
               ))}
 
               {(
@@ -948,15 +1213,22 @@ export default function HennaApp() {
 
 /* ------------------------------ Sub-components ---------------------------- */
 
-function ChartCard({ title, note, data, color, domain, unit }) {
+function ChartCard({ title, note, data, color, domain, unit, kind, totalWindow, reference, referenceLabel, hideValue }) {
   const latest = data[data.length - 1];
+  const isTotal = kind === "total";
+  const lineKey = isTotal ? "total" : "avg";
+  const axisDomain = isTotal ? [0, "dataMax + 2"] : domain;
   return (
     <div style={{ background: CARD, borderColor: BORDER }} className="rounded-2xl border p-4">
-      <div className="flex items-center justify-between mb-3">
+      <div className="flex items-center justify-between mb-3 gap-2">
         <h2 style={{ fontFamily: FONT_DISPLAY }} className="text-sm font-semibold">{title}</h2>
         {latest && (
-          <span style={{ fontFamily: FONT_MONO, color: TEXT_SECONDARY }} className="text-xs">
-            {latest.value}{unit} · {latest.avg} avg
+          <span style={{ fontFamily: FONT_MONO, color: TEXT_SECONDARY }} className="text-xs shrink-0">
+            {isTotal
+              ? `${latest.total}${unit} · last ${totalWindow} days`
+              : hideValue
+              ? `${latest.avg}${unit}`
+              : `${latest.value}${unit} · ${latest.avg} avg`}
           </span>
         )}
       </div>
@@ -965,14 +1237,22 @@ function ChartCard({ title, note, data, color, domain, unit }) {
           <LineChart data={data} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
             <CartesianGrid stroke={BORDER} strokeDasharray="3 3" vertical={false} />
             <XAxis dataKey="label" tick={{ fill: TEXT_MUTED, fontSize: 10 }} axisLine={{ stroke: BORDER }} tickLine={false} interval="preserveStartEnd" />
-            <YAxis domain={domain} tick={{ fill: TEXT_MUTED, fontSize: 10 }} axisLine={false} tickLine={false} width={26} />
+            <YAxis domain={axisDomain} tick={{ fill: TEXT_MUTED, fontSize: 10 }} axisLine={false} tickLine={false} width={26} />
             <Tooltip contentStyle={{ background: CARD, border: `1px solid ${BORDER}`, borderRadius: 8, fontFamily: FONT_MONO, fontSize: 11 }} />
-            <Line type="monotone" dataKey="value" stroke={TEXT_MUTED} strokeWidth={1.5} dot={{ r: 2, fill: TEXT_MUTED }} />
-            <Line type="monotone" dataKey="avg" stroke={color} strokeWidth={2.5} dot={false} />
+            {reference != null && (
+              <ReferenceLine y={reference} stroke={TEXT_MUTED} strokeDasharray="4 3" strokeWidth={1} />
+            )}
+            {!hideValue && (
+              <Line type="monotone" dataKey="value" stroke={TEXT_MUTED} strokeWidth={1.5} dot={{ r: 2, fill: TEXT_MUTED }} />
+            )}
+            <Line type="monotone" dataKey={lineKey} stroke={color} strokeWidth={2.5} dot={false} />
           </LineChart>
         </ResponsiveContainer>
       </div>
       <p style={{ color: TEXT_MUTED }} className="text-[11px] mt-2">{note}</p>
+      {referenceLabel && (
+        <p style={{ color: TEXT_MUTED }} className="text-[11px] mt-1">Dashed line: {referenceLabel}</p>
+      )}
     </div>
   );
 }
@@ -1044,39 +1324,82 @@ function CalendarView(p) {
       </div>
 
       <div className="space-y-1.5">
-        {weeks.map((week, wi) => (
-          <div key={wi} className="grid grid-cols-7 gap-1.5">
-            {week.map((d) => {
-              const inMonth = d.getMonth() === p.calMonth;
-              const isToday = dateKey(d) === p.todayKey;
-              const isSel = dateKey(d) === dateKey(p.calSelected);
-              const i = resolveSchedule(d, "auto", p.overrides, PROGRAM);
-              return (
-                <button key={dateKey(d)} onClick={() => pick(d)}
-                        style={{ background: isSel ? "rgba(201,115,136,0.12)" : CARD,
-                                 borderColor: isToday ? ACCENT : BORDER,
-                                 borderWidth: isToday ? 2 : 1,
-                                 borderStyle: i.anyMoved ? "dashed" : "solid" }}
-                        className="aspect-square rounded-lg border flex flex-col items-center justify-center gap-0.5">
-                  <span style={{ fontFamily: FONT_MONO, color: inMonth ? TEXT_PRIMARY : TEXT_MUTED }} className="text-xs">{d.getDate()}</span>
-                  <span className="flex gap-0.5 h-1.5">
-                    {i.slots.strength && <span style={{ background: ACCENT }} className="w-1.5 h-1.5 rounded-full" />}
-                    {i.activities.length > 0 && <span style={{ background: CATS.activity.color }} className="w-1.5 h-1.5 rounded-full" />}
-                    {i.slots.yoga && <span style={{ background: CATS.yoga.color }} className="w-1.5 h-1.5 rounded-full" />}
-                  </span>
+        {weeks.map((week, wi) => {
+          // The weekly deload toggle. It writes the flag to all 7 days; the
+          // 4th-week wave only SUGGESTS one (dashed outline), it never turns
+          // one on. Deloading answers how the last three weeks actually felt,
+          // which a calendar cannot know.
+          const weekMonday = week[0];
+          const deloadOn = resolveSchedule(weekMonday, "auto", p.overrides, PROGRAM).deload === true;
+          const suggested = suggestDeloadWeek(weekMonday, PROGRAM);
+          return (
+            <div key={wi} className="flex items-stretch gap-1.5">
+              {PROGRAM.showDeloadToggle && (
+                <button onClick={() => p.setWeekDeload(weekMonday, !deloadOn)}
+                        aria-pressed={deloadOn}
+                        aria-label={deloadOn ? "Turn off the gentler week" : "Turn on a gentler week"}
+                        title={deloadOn ? "Gentler week on" : suggested ? "Usually your gentler week" : "Gentler week"}
+                        style={{
+                          background: deloadOn ? ACCENT : "transparent",
+                          borderColor: deloadOn ? ACCENT : suggested ? ACCENT + "80" : BORDER,
+                          borderStyle: suggested && !deloadOn ? "dashed" : "solid",
+                          color: deloadOn ? "#fff" : TEXT_MUTED,
+                        }}
+                        className="shrink-0 w-7 self-stretch rounded-md border flex items-center justify-center text-[10px] font-bold">
+                  D
                 </button>
-              );
-            })}
-          </div>
-        ))}
+              )}
+              <div className="grid grid-cols-7 gap-1.5 flex-1">
+                {week.map((d) => {
+                  const inMonth = d.getMonth() === p.calMonth;
+                  const isToday = dateKey(d) === p.todayKey;
+                  const isSel = dateKey(d) === dateKey(p.calSelected);
+                  const i = resolveSchedule(d, "auto", p.overrides, PROGRAM);
+                  return (
+                    <button key={dateKey(d)} onClick={() => pick(d)}
+                            style={{ background: isSel ? "rgba(201,115,136,0.12)" : i.deload === true ? ACCENT + "14" : CARD,
+                                     borderColor: isToday ? ACCENT : BORDER,
+                                     borderWidth: isToday ? 2 : 1,
+                                     borderStyle: i.anyMoved ? "dashed" : "solid",
+                                     opacity: i.skip ? 0.55 : 1 }}
+                            className="aspect-square rounded-lg border flex flex-col items-center justify-center gap-0.5">
+                      <span style={{ fontFamily: FONT_MONO, color: inMonth ? TEXT_PRIMARY : TEXT_MUTED }} className="text-xs">{d.getDate()}</span>
+                      <span className="flex gap-0.5 h-1.5">
+                        {i.skip
+                          ? <Ban size={9} style={{ color: CATS.check.color }} />
+                          : <>
+                              {PROGRAM.slots.map((sl) => i.slots[sl] && (
+                                <span key={sl} style={{ background: SLOT_META[sl].color }} className="w-1.5 h-1.5 rounded-full" />
+                              ))}
+                              {i.activities.length > 0 && <span style={{ background: CATS.activity.color }} className="w-1.5 h-1.5 rounded-full" />}
+                              {resolveTesting(d, p.overrides, PROGRAM).some((t) => t.due) && (
+                                <span style={{ background: (CATS.testing || CATS.check).color }} className="w-1.5 h-1.5 rounded-full" />
+                              )}
+                            </>}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
       </div>
 
       <div className="flex items-center gap-3 mt-3 flex-wrap">
-        {[["Strength", ACCENT], ["Yoga", CATS.yoga.color], ["Activity", CATS.activity.color]].map(([l, c]) => (
-          <span key={l} className="flex items-center gap-1.5 text-[11px]" style={{ color: TEXT_SECONDARY }}>
-            <span style={{ background: c }} className="w-2 h-2 rounded-full" />{l}
+        {PROGRAM.slots.map((sl) => (
+          <span key={sl} className="flex items-center gap-1.5 text-[11px]" style={{ color: TEXT_SECONDARY }}>
+            <span style={{ background: SLOT_META[sl].color }} className="w-2 h-2 rounded-full" />{SLOT_META[sl].label}
           </span>
         ))}
+        <span className="flex items-center gap-1.5 text-[11px]" style={{ color: TEXT_SECONDARY }}>
+          <span style={{ background: CATS.activity.color }} className="w-2 h-2 rounded-full" />Activity
+        </span>
+        {PROGRAM.testing && (
+          <span className="flex items-center gap-1.5 text-[11px]" style={{ color: TEXT_SECONDARY }}>
+            <span style={{ background: (CATS.testing || CATS.check).color }} className="w-2 h-2 rounded-full" />Testing due
+          </span>
+        )}
       </div>
 
       <div style={{ background: CARD, borderColor: BORDER }} className="rounded-2xl border overflow-hidden mt-4">
@@ -1084,13 +1407,35 @@ function CalendarView(p) {
           <h3 style={{ fontFamily: FONT_DISPLAY }} className="text-sm font-semibold">
             {p.calSelected.toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" })}
           </h3>
+          <div className="flex items-center gap-1.5 mt-2 flex-wrap">
+            <span style={{ color: TEXT_MUTED }} className="text-[11px] mr-0.5">Skip day:</span>
+            {SKIP_REASONS.map((r) => {
+              const on = selInfo.skip === r.value;
+              return (
+                <button key={r.value} onClick={() => p.setSkip(p.calSelected, on ? null : r.value)}
+                        aria-pressed={on}
+                        style={{ background: on ? CATS.check.color : "transparent",
+                                 color: on ? "#fff" : TEXT_SECONDARY,
+                                 borderColor: on ? CATS.check.color : BORDER }}
+                        className="text-[11px] font-semibold px-2.5 py-1 rounded-lg border">
+                  {r.label}
+                </button>
+              );
+            })}
+          </div>
+          {selInfo.skip && (
+            <p style={{ color: TEXT_MUTED }} className="text-[11px] mt-1.5">
+              Training is cleared for this day and your streak pauses rather than breaks. Nothing is deleted —
+              tap {selInfo.skipLabel} again and the day comes back exactly as it was.
+            </p>
+          )}
         </div>
 
         {PROGRAM.slots.map((slotName) => {
           const meta = SLOT_META[slotName];
           const value = selInfo.slots[slotName];
           const blk = value ? BLOCKS[slotName][value] : null;
-          const SlotIcon = slotName === "yoga" ? Flower2 : Dumbbell;
+          const SlotIcon = (CATS[meta.cat || slotName] && CATS[meta.cat || slotName].Icon) || meta.Icon || Dumbbell;
           const isEditing = p.editingBlock === slotName;
           const isMovingThis = p.moveSource && p.moveSource.slot === slotName;
           return (
@@ -1153,6 +1498,40 @@ function CalendarView(p) {
             </div>
           );
         })}
+
+        {PROGRAM.testing && (
+          <div style={{ borderColor: BORDER, borderLeftColor: (CATS.testing || CATS.check).color }}
+               className="border-t border-l-4 px-4 py-3">
+            <div className="flex items-center gap-2 mb-2">
+              <CalendarDays size={14} style={{ color: (CATS.testing || CATS.check).color }} />
+              <p style={{ fontFamily: FONT_DISPLAY }} className="text-xs font-semibold">Testing</p>
+            </div>
+            <div className="space-y-2">
+              {resolveTesting(p.calSelected, p.overrides, PROGRAM).map((t) => (
+                <div key={t.id} className="flex items-center justify-between gap-2">
+                  <p style={{ color: t.due ? TEXT_PRIMARY : TEXT_MUTED }} className="text-xs">
+                    {t.label}{t.due ? " — due" : ""}
+                  </p>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button onClick={() => p.setBlock(p.calSelected, t.ovKey, !t.due)}
+                            style={{ color: (CATS.testing || CATS.check).color }}
+                            className="text-[11px] font-semibold">
+                      {t.due ? "Not due" : "Mark due"}
+                    </button>
+                    {t.moved && (
+                      <button onClick={() => p.resetBlock(p.calSelected, t.ovKey)}
+                              style={{ color: TEXT_MUTED }} className="text-[11px] font-medium">Reset</button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <p style={{ color: TEXT_MUTED }} className="text-[11px] mt-2">
+              Calculated automatically from your baseline date. To move a test, turn it off here and turn it on
+              wherever you actually want it. Log the results from Today.
+            </p>
+          </div>
+        )}
 
         <div style={{ borderColor: BORDER, borderLeftColor: CATS.activity.color }} className="border-t border-l-4 px-4 py-3">
           <div className="flex items-center gap-2 mb-2">
@@ -1236,7 +1615,7 @@ function pushBackup(log) {
       fetch(BACKUP_URL, {
         method: "POST",
         headers: { "Content-Type": "text/plain;charset=utf-8" },
-        body: JSON.stringify({ person: "Henna", kind: "backup", payload: { log, syncedAt: new Date().toISOString() } }),
+        body: JSON.stringify({ person: CLIENT_NAME, kind: "backup", payload: { log, syncedAt: new Date().toISOString() } }),
       }).catch(() => {});
     } catch {
       /* offline or blocked — the local copy is unaffected */

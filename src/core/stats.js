@@ -1,45 +1,37 @@
 // Generic statistics. buildHistoryRows moved to engine.js when it became
-// program-driven; these three depend only on rows + dates, so they stay here.
+// program-driven; these depend only on rows + dates, so they stay here.
+//
+// v2: computeStreak now PAUSES on a skip day (sick / travel / injured)
+// rather than breaking. computeWeightSeries was removed — it read `r.weight`,
+// a field buildHistoryRows stopped producing when the data model moved to
+// `numbers`, and nothing imported it. Use computeSeries(rows, id,
+// { bucket: "numbers" }) instead.
 import { dateKey } from "./dates.js";
-function computeWeightSeries(rows) {
-  const byDate = {};
-  rows.forEach((r) => {
-    if (r.weight != null) byDate[r.date] = r.weight;
-  });
-  return rows
-    .filter((r) => r.weight != null)
-    .map((r) => {
-      let sum = 0;
-      let count = 0;
-      for (let i = 0; i < 7; i++) {
-        const d = new Date(r.dateObj);
-        d.setDate(d.getDate() - i);
-        const w = byDate[dateKey(d)];
-        if (w != null) {
-          sum += w;
-          count += 1;
-        }
-      }
-      return {
-        date: r.date,
-        label: r.dateObj.toLocaleDateString(undefined, { day: "numeric", month: "short" }),
-        weight: r.weight,
-        avg7: count ? Math.round((sum / count) * 10) / 10 : null,
-      };
-    });
-}
 
+/**
+ * Consecutive days at or above `threshold` completion, counting back from the
+ * most recent logged day.
+ *
+ * A skip day is neither a hit nor a miss: the walk steps over it and keeps
+ * going. Being ill should not cost you a streak you earned, and it should not
+ * hand you one you did not.
+ */
 function computeStreak(rows, threshold = 0.8) {
   if (!rows.length) return 0;
   const byDate = {};
   rows.forEach((r) => (byDate[r.date] = r));
   const cursor = new Date(rows[rows.length - 1].dateObj);
   let streak = 0;
-  // eslint-disable-next-line no-constant-condition
-  while (true) {
+  let guard = 0;
+  while (guard++ < 3650) {
     const key = dateKey(cursor);
     const r = byDate[key];
-    if (r && r.pct >= threshold) {
+    if (!r) break;
+    if (r.skip) {
+      cursor.setDate(cursor.getDate() - 1); // paused, not counted, not broken
+      continue;
+    }
+    if (r.pct >= threshold) {
       streak += 1;
       cursor.setDate(cursor.getDate() - 1);
     } else break;
@@ -61,7 +53,8 @@ function buildHeatmapCells(rows, weeksBack = 12) {
   const cursor = new Date(start);
   while (cursor <= end) {
     const key = dateKey(cursor);
-    cells.push({ date: key, dow: cursor.getDay(), pct: byDate[key] ? byDate[key].pct : null });
+    const r = byDate[key];
+    cells.push({ date: key, dow: cursor.getDay(), pct: r ? r.pct : null, skip: r ? r.skip || null : null });
     cursor.setDate(cursor.getDate() + 1);
   }
   const weeks = [];
@@ -69,4 +62,4 @@ function buildHeatmapCells(rows, weeksBack = 12) {
   return weeks;
 }
 
-export { computeWeightSeries, computeStreak, buildHeatmapCells };
+export { computeStreak, buildHeatmapCells };

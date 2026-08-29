@@ -382,6 +382,10 @@ export const PROGRAM = {
   // No deload anchor: her gentler week is a switch she flips, not a date.
   // Her cycle already provides one rhythm; the app doesn't impose a second.
   deloadAnchor: null,
+  // UI flags. showDeloadToggle draws the weekly D column in the Calendar;
+  // usesHeartRate reveals the Max HR field in Settings.
+  showDeloadToggle: true,
+  usesHeartRate: false,
   tracking: {
     weight: false,
     nutrition: false,

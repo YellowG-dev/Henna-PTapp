@@ -10,6 +10,8 @@ export { MOBILITY, BLOCKS, SLOT_OPTIONS, SLOT_META, APP_VERSION };
 
 export const PROGRAM = PROGRAM_DATA;
 export const CLIENT_LABEL = "Daily PT · Henna";
+// Tags rows in the shared backup sheet. Must match the tab name.
+export const CLIENT_NAME = "Henna";
 export const STORAGE_PREFIX = "ptAppHenna_";
 
 // Programme start. The first fortnight runs one set lighter.
