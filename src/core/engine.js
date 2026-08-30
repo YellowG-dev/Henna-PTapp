@@ -179,6 +179,7 @@ function mapTask(e, opt) {
     presc: withBpm(presc, e.pctMin, e.pctMax, opt.hrMax),
     detail: e.detail || null,
     video: e.video || null,
+    pattern: e.pattern || null,
     altName: e.altName || null,
     altVideo: e.altVideo || null,
     sets: e.sets != null ? (gentler ? Math.max(1, e.sets - 1) : e.sets) : null,
@@ -253,6 +254,7 @@ export function buildSections(date, opts, program) {
     sections.push({
       key: slotName,
       cat: block.cat || slotName,
+      noGym: Boolean(block.noGym),
       title: block.label,
       subtitle: isGentler ? block.gentlerNote || program.gentlerNote : block.subtitle || null,
       tasks: block.exercises.map((e) => mapTask(e, opt)),
@@ -529,4 +531,38 @@ export { getISOWeek, dateKey, daysBetween };
 /** @deprecated use computeSeries(rows, id, { bucket: "scales" }) */
 export function computeScaleSeries(rows, id, windowDays) {
   return computeSeries(rows, id, { bucket: "scales", windowDays: windowDays || 7 });
+}
+
+/* ---------------------------- Substitution keys ---------------------------
+ * Loads are keyed by what was ACTUALLY done, not by the slot. A standard
+ * session writes to the plain slot id, exactly as before, so existing history
+ * is untouched. A substituted session writes to `<slot>::<variant-slug>`, so a
+ * barbell number can never be shown as a dumbbell number, in either direction.
+ * ------------------------------------------------------------------------- */
+
+export function slugify(s) {
+  return String(s || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+}
+
+export function loadKeyFor(exId, rec) {
+  const sub = rec && rec.subs && rec.subs[exId] && rec.subs[exId].name;
+  if (!sub) return exId;
+  const key = exId + "::" + slugify(sub);
+  // Legacy safety: days logged before variant-keyed loads existed stored a
+  // substituted lift under the plain slot id. If that day already holds data
+  // there and nothing under the new key, keep using the old one so the numbers
+  // stay visible and editable. No migration, nothing moved.
+  const loads = (rec && rec.loads) || {};
+  const hasNew = Array.isArray(loads[key]) && loads[key].some((s) => s && (s.w != null || s.r != null));
+  const hasOld = Array.isArray(loads[exId]) && loads[exId].some((s) => s && (s.w != null || s.r != null));
+  if (!hasNew && hasOld) return exId;
+  return key;
+}
+
+/** "up-1::incline-barbell-press" -> "Incline barbell press" */
+export function labelForLoadKey(key, baseNameFor) {
+  const i = String(key).indexOf("::");
+  if (i === -1) return baseNameFor ? baseNameFor(key) : key;
+  const slug = key.slice(i + 2).replace(/-/g, " ");
+  return slug.charAt(0).toUpperCase() + slug.slice(1);
 }

@@ -16,7 +16,9 @@ import {
   resolveSchedule, buildSections, buildHistoryRows, isTaskDone, countableTasks,
   computeSeries, computeRollingTotal, computeLoadSeries, targetMet,
   suggestDeloadWeek, resolveTesting, SKIP_REASONS, dateKey, daysBetween, getISOWeek,
+  loadKeyFor, labelForLoadKey,
 } from "./core/engine.js";
+import { variantsFor } from "./core/patterns.js";
 import { computeStreak, buildHeatmapCells } from "./core/stats.js";
 import { createStore, localStorageAdapter } from "./core/storage.js";
 
@@ -90,6 +92,8 @@ export default function HennaApp() {
   const [copyStatus, setCopyStatus] = useState("");
   const [importStatus, setImportStatus] = useState("");
   const [selectedExerciseId, setSelectedExerciseId] = useState(null);
+  const [swapOpen, setSwapOpen] = useState(null);
+  const [swapFree, setSwapFree] = useState({});
 
   /* ------------------------------ Load state ----------------------------- */
 
@@ -241,6 +245,27 @@ export default function HennaApp() {
       const subs = { ...(r.subs || {}) };
       if (subs[exId]) delete subs[exId];
       else subs[exId] = { name: altName };
+      return { ...r, subs };
+    });
+  }, [persist]);
+
+  // Swap to a named variant. Same {name, reason} shape the app has always
+  // written, so existing substitution history stays readable.
+  const setSwap = useCallback((exId, name, reason) => {
+    persist((r) => {
+      const subs = { ...(r.subs || {}) };
+      const t = String(name || "").trim();
+      if (t) subs[exId] = { name: t, reason: reason || null };
+      else delete subs[exId];
+      return { ...r, subs };
+    });
+  }, [persist]);
+
+  const setSwapReason = useCallback((exId, reason) => {
+    persist((r) => {
+      const subs = { ...(r.subs || {}) };
+      if (!subs[exId]) return r;
+      subs[exId] = { ...subs[exId], reason: subs[exId].reason === reason ? null : reason };
       return { ...r, subs };
     });
   }, [persist]);
@@ -406,7 +431,9 @@ export default function HennaApp() {
       }
       return id;
     };
-    return [...found].map((id) => ({ id, name: nameFor(id) })).sort((a, b) => a.name.localeCompare(b.name));
+    return [...found]
+      .map((id) => ({ id, name: labelForLoadKey(id, nameFor) }))
+      .sort((a, b) => a.name.localeCompare(b.name));
   }, [log]);
 
   useEffect(() => {
@@ -1006,8 +1033,10 @@ export default function HennaApp() {
 
                               {section.cat === "strength" && (() => {
                                 const count = setCountFor(task, ramp);
-                                const last = lastLoads[task.id];
+                                const lk = loadKeyFor(task.id, rec);
+                                const last = lastLoads[lk];
                                 const lastNote = lastExNotes[task.id];
+                                const swapped = Boolean(sub?.name);
                                 return (
                                   <>
                                     {lastNote && (
@@ -1020,9 +1049,14 @@ export default function HennaApp() {
                                         {" · "}{daysBetween(last.dateObj, viewedDate)}d ago
                                       </p>
                                     )}
+                                    {!last && swapped && (
+                                      <p style={{ color: TEXT_MUTED }} className="text-[11px]">
+                                        First time doing this — no previous data
+                                      </p>
+                                    )}
                                     <div className="flex gap-2 flex-wrap">
                                       {Array.from({ length: count }).map((_, si) => {
-                                        const wKey = `${task.id}:${si}:w`, rKey = `${task.id}:${si}:r`;
+                                        const wKey = `${lk}:${si}:w`, rKey = `${lk}:${si}:r`;
                                         const le = last?.entries?.[si];
                                         return (
                                           <div key={si} className="flex flex-col items-center gap-0.5">
@@ -1032,14 +1066,14 @@ export default function HennaApp() {
                                                      placeholder={le?.w != null ? String(le.w) : "kg"}
                                                      value={loadDrafts[wKey] ?? ""} onClick={(e) => e.stopPropagation()}
                                                      onChange={(e) => setLoadDrafts((p) => ({ ...p, [wKey]: e.target.value }))}
-                                                     onBlur={(e) => commitLoad(task.id, si, "w", e.target.value)}
+                                                     onBlur={(e) => commitLoad(lk, si, "w", e.target.value)}
                                                      style={{ fontFamily: FONT_MONO, borderColor: BORDER, background: BG }}
                                                      className="w-11 text-center text-xs px-1 py-1 rounded-md border" />
                                               <input type="text" inputMode="numeric" aria-label={`${task.name} set ${si + 1} reps`}
                                                      placeholder={le?.r != null ? String(le.r) : "reps"}
                                                      value={loadDrafts[rKey] ?? ""} onClick={(e) => e.stopPropagation()}
                                                      onChange={(e) => setLoadDrafts((p) => ({ ...p, [rKey]: e.target.value }))}
-                                                     onBlur={(e) => commitLoad(task.id, si, "r", e.target.value)}
+                                                     onBlur={(e) => commitLoad(lk, si, "r", e.target.value)}
                                                      style={{ fontFamily: FONT_MONO, borderColor: BORDER, background: BG }}
                                                      className="w-10 text-center text-xs px-1 py-1 rounded-md border" />
                                             </div>
@@ -1047,6 +1081,96 @@ export default function HennaApp() {
                                         );
                                       })}
                                     </div>
+
+                                    {task.pattern && (() => {
+                                      const opts = variantsFor(task.pattern, {
+                                        prescribedName: task.name,
+                                        alsoToday: section.tasks.filter((t) => t.id !== task.id).map((t) => t.name),
+                                        noGym: Boolean(section.noGym),
+                                      });
+                                      const open = swapOpen === task.id;
+                                      if (swapped) {
+                                        return (
+                                          <div style={{ borderColor: BORDER }} className="pt-2 border-t space-y-1.5">
+                                            <div className="flex items-center gap-2 flex-wrap">
+                                              <span style={{ background: cat.color, color: "#fff" }}
+                                                    className="text-[11px] font-semibold px-2 py-1 rounded-lg flex items-center gap-1.5">
+                                                <Repeat size={11} /> Doing: {sub.name}
+                                              </span>
+                                              <button onClick={(e) => { e.stopPropagation(); setSwap(task.id, "", null); setSwapOpen(null); }}
+                                                      style={{ color: TEXT_SECONDARY }} className="text-[11px] font-semibold">
+                                                Back to prescribed
+                                              </button>
+                                            </div>
+                                            <div className="flex gap-1 flex-wrap items-center">
+                                              <span style={{ color: TEXT_MUTED }} className="text-[10px]">Why? (optional)</span>
+                                              {["equipment", "pain", "time", "fatigue", "other"].map((rsn) => (
+                                                <button key={rsn} onClick={(e) => { e.stopPropagation(); setSwapReason(task.id, rsn); }}
+                                                        style={{
+                                                          background: sub.reason === rsn ? cat.color : "transparent",
+                                                          color: sub.reason === rsn ? "#fff" : TEXT_SECONDARY,
+                                                          borderColor: sub.reason === rsn ? cat.color : BORDER,
+                                                        }}
+                                                        className="text-[10px] font-semibold px-2 py-0.5 rounded-lg border capitalize">
+                                                  {rsn}
+                                                </button>
+                                              ))}
+                                            </div>
+                                          </div>
+                                        );
+                                      }
+                                      return (
+                                        <div style={{ borderColor: BORDER }} className="pt-2 border-t">
+                                          {!open ? (
+                                            <button onClick={(e) => { e.stopPropagation(); setSwapOpen(task.id); }}
+                                                    style={{ color: TEXT_SECONDARY, borderColor: BORDER }}
+                                                    className="text-[11px] font-semibold flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border">
+                                              <Repeat size={12} /> Swap exercise
+                                            </button>
+                                          ) : (
+                                            <div className="space-y-1.5" onClick={(e) => e.stopPropagation()}>
+                                              <div className="flex items-center justify-between">
+                                                <span style={{ color: TEXT_MUTED }} className="text-[10px] uppercase tracking-wide">
+                                                  Swap to
+                                                </span>
+                                                <button onClick={() => setSwapOpen(null)} style={{ color: TEXT_SECONDARY }}
+                                                        className="text-[11px] font-semibold">Cancel</button>
+                                              </div>
+                                              {opts.length === 0 && (
+                                                <p style={{ color: TEXT_MUTED }} className="text-[11px]">
+                                                  No alternatives available for this session.
+                                                </p>
+                                              )}
+                                              {opts.map((v) => (
+                                                <button key={v.name}
+                                                        onClick={() => { setSwap(task.id, v.name, null); setSwapOpen(null); }}
+                                                        style={{ borderColor: BORDER, color: TEXT_PRIMARY }}
+                                                        className="w-full text-left text-[11px] px-2.5 py-1.5 rounded-lg border flex items-center justify-between">
+                                                  <span>{v.name}</span>
+                                                  <span style={{ color: TEXT_MUTED }} className="text-[10px]">{v.equip}</span>
+                                                </button>
+                                              ))}
+                                              <div className="flex gap-1.5">
+                                                <input type="text" value={swapFree[task.id] ?? ""}
+                                                       onChange={(e) => setSwapFree((p) => ({ ...p, [task.id]: e.target.value }))}
+                                                       placeholder="Something else…"
+                                                       style={{ color: TEXT_PRIMARY, borderColor: BORDER, background: BG }}
+                                                       className="flex-1 min-w-0 text-[11px] px-2.5 py-1.5 rounded-lg border" />
+                                                <button onClick={() => {
+                                                          const t = (swapFree[task.id] || "").trim();
+                                                          if (!t) return;
+                                                          setSwap(task.id, t, null);
+                                                          setSwapFree((p) => ({ ...p, [task.id]: "" }));
+                                                          setSwapOpen(null);
+                                                        }}
+                                                        style={{ background: cat.color, color: "#fff" }}
+                                                        className="shrink-0 text-[11px] font-semibold px-3 rounded-lg">Use</button>
+                                              </div>
+                                            </div>
+                                          )}
+                                        </div>
+                                      );
+                                    })()}
 
                                     {task.altName && (
                                       <button onClick={(e) => { e.stopPropagation(); toggleAlt(task.id, task.altName); }}

@@ -121,7 +121,7 @@ export function createStore(adapter, prefix = "ptAppParent_") {
       const [settings, log, overrides] = await Promise.all([
         this.loadJSON("settings", {}),
         this.loadJSON("log", {}),
-        this.loadJSON("scheduleOverrides", {}),
+        this.loadJSON("overrides", {}),
       ]);
       return { settings, log, overrides, exportedAt: new Date().toISOString().slice(0, 10) };
     },
@@ -132,7 +132,7 @@ export function createStore(adapter, prefix = "ptAppParent_") {
       await Promise.all([
         this.saveJSON("settings", payload.settings || {}),
         this.saveJSON("log", payload.log || {}),
-        this.saveJSON("scheduleOverrides", payload.overrides || {}),
+        this.saveJSON("overrides", payload.overrides || {}),
       ]);
     },
   };
