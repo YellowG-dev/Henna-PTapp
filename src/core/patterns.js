@@ -136,6 +136,10 @@ export const PATTERNS = {
     {
       "name": "Band row",
       "equip": "band"
+    },
+    {
+      "name": "Barbell row",
+      "equip": "barbell"
     }
   ],
   "rear-delt": [
@@ -212,6 +216,10 @@ export const PATTERNS = {
     {
       "name": "Barbell hip thrust",
       "equip": "barbell"
+    },
+    {
+      "name": "Single-leg press",
+      "equip": "machine"
     },
     {
       "name": "Single-leg hip thrust",
