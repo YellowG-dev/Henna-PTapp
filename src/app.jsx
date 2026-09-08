@@ -8,7 +8,7 @@ import {
 } from "recharts";
 
 import {
-  PROGRAM, THEME, ProgramView, CLIENT_LABEL, CLIENT_NAME, STORAGE_PREFIX, BACKUP_URL,
+  PROGRAM, THEME, ProgramView, CLIENT_LABEL, CLIENT_NAME, STORAGE_PREFIX,
   START_DATE, RAMP_WEEKS, APP_VERSION, MOBILITY, BLOCKS, SLOT_OPTIONS, SLOT_META,
 } from "./config.jsx";
 
@@ -21,6 +21,11 @@ import {
 import { variantsFor } from "./core/patterns.js";
 import { computeStreak, buildHeatmapCells } from "./core/stats.js";
 import { createStore, localStorageAdapter } from "./core/storage.js";
+import { isConfigured, currentUser, onAuthChange, sendMagicLink, signOut } from "./core/supabase.js";
+import {
+  configureSync, pullAndMerge, queueLogDay, queueOverrideChanges,
+  queueSettings, flushNow, watchConnectivity,
+} from "./core/sync.js";
 
 /* --------------------------------- Config -------------------------------- */
 
@@ -89,6 +94,13 @@ export default function HennaApp() {
   const [moveSource, setMoveSource] = useState(null);
 
   const [backupText, setBackupText] = useState("");
+
+  // Account and sync. All inert when signed out.
+  const [authUser, setAuthUser] = useState(null);
+  const [syncState, setSyncState] = useState({ status: "offline", pendingCount: 0, lastSyncedAt: null });
+  const [emailDraft, setEmailDraft] = useState("");
+  const [authMsg, setAuthMsg] = useState("");
+  const syncedUserRef = useRef(null);
   const [copyStatus, setCopyStatus] = useState("");
   const [importStatus, setImportStatus] = useState("");
   const [selectedExerciseId, setSelectedExerciseId] = useState(null);
@@ -113,6 +125,51 @@ export default function HennaApp() {
       setLoading(false);
     })();
     return () => { cancelled = true; };
+  }, []);
+
+  /* ------------------------------- Cloud sync ----------------------------- */
+  // Runs after the local load above. Signed out, this does nothing at all.
+  //
+  // Note it re-reads from `store` rather than from React state: state inside
+  // this effect would be frozen at mount, and the store is always current.
+  useEffect(() => {
+    if (!isConfigured()) return;
+
+    const attach = async (user) => {
+      setAuthUser(user || null);
+      const uid = user?.id || null;
+      if (syncedUserRef.current === uid) return;   // same user, nothing to redo
+      syncedUserRef.current = uid;
+
+      await configureSync({ store, userId: uid, onStateChange: setSyncState });
+      if (!uid) return;
+
+      const [l, ov, s] = await Promise.all([
+        store.loadJSON("log", {}),
+        store.loadJSON("overrides", {}),
+        store.loadJSON("settings", { gentler: false, hrMax: null }),
+      ]);
+
+      // Returns null if offline or the fetch failed — in which case the local
+      // copy is left exactly as it is. Never a reason to lose anything.
+      const merged = await pullAndMerge({ log: l, overrides: ov, settings: s });
+      if (!merged) return;
+
+      setLog(merged.log);
+      setOverrides(merged.overrides);
+      setSettings(merged.settings);
+      setHrMaxDraft(merged.settings?.hrMax != null ? String(merged.settings.hrMax) : "");
+      store.saveJSON("log", merged.log);
+      store.saveJSON("overrides", merged.overrides);
+      store.saveJSON("settings", merged.settings);
+    };
+
+    let stopAuth = () => {};
+    const stopConn = watchConnectivity();
+    stopAuth = onAuthChange(attach);
+    currentUser().then(attach);
+
+    return () => { stopAuth(); stopConn(); };
   }, []);
 
   const viewedDate = useMemo(() => {
@@ -158,7 +215,7 @@ export default function HennaApp() {
       const nextRec = updater({ ...base });
       const next = { ...prev, [viewedKey]: { ...nextRec, gentler } };
       store.saveJSON("log", next);
-      pushBackup(next);
+      queueLogDay(viewedKey, next[viewedKey]);
       return next;
     });
   }, [viewedKey, gentler]);
@@ -274,6 +331,7 @@ export default function HennaApp() {
     setSettings((prev) => {
       const next = { ...prev, ...partial };
       store.saveJSON("settings", next);
+      queueSettings(next);
       return next;
     });
   }, []);
@@ -282,6 +340,7 @@ export default function HennaApp() {
     setOverrides((prev) => {
       const next = updater(prev);
       store.saveJSON("overrides", next);
+      queueOverrideChanges(prev, next);
       return next;
     });
   }, []);
@@ -572,6 +631,10 @@ export default function HennaApp() {
       store.saveJSON("log", parsed.log || {});
       store.saveJSON("overrides", parsed.overrides || {});
       store.saveJSON("settings", parsed.settings || { gentler: false, hrMax: null });
+      // A restore is a deliberate act — push every day of it up.
+      Object.keys(parsed.log || {}).forEach((d) => queueLogDay(d, parsed.log[d]));
+      queueOverrideChanges({}, parsed.overrides || {});
+      queueSettings(parsed.settings || { gentler: false, hrMax: null });
       setImportStatus("Restored");
     } catch {
       setImportStatus("Couldn't read that — check it's a full backup");
@@ -680,6 +743,64 @@ export default function HennaApp() {
                 </div>
               </div>
             )}
+
+            <div style={{ borderColor: BORDER }} className="border-t pt-4">
+              <p className="text-xs font-semibold mb-1">Account &amp; sync</p>
+              {!isConfigured() ? (
+                <p style={{ color: TEXT_MUTED }} className="text-[11px]">
+                  This build is not connected to an account. Everything stays on this device.
+                </p>
+              ) : authUser ? (
+                <>
+                  <p style={{ color: TEXT_MUTED }} className="text-[11px] mb-1">
+                    Signed in as {authUser.email}
+                  </p>
+                  <p style={{ color: TEXT_MUTED }} className="text-[11px] mb-2">
+                    {syncState.status === "syncing"
+                      ? "Saving to your account…"
+                      : syncState.pendingCount > 0
+                      ? `${syncState.pendingCount} change${syncState.pendingCount === 1 ? "" : "s"} waiting for a connection`
+                      : syncState.status === "error"
+                      ? "No connection — saved on this device, will sync later"
+                      : syncState.lastSyncedAt
+                      ? `Everything saved · ${new Date(syncState.lastSyncedAt).toLocaleTimeString()}`
+                      : "Connected"}
+                  </p>
+                  <div className="flex gap-1.5">
+                    <button onClick={() => flushNow()} style={{ borderColor: BORDER }}
+                            className="flex-1 text-xs font-semibold py-1.5 rounded-lg border">Sync now</button>
+                    <button onClick={async () => {
+                              await signOut();
+                              syncedUserRef.current = null;
+                              setAuthMsg("Signed out. Your log is still here on this device.");
+                            }}
+                            style={{ borderColor: BORDER }}
+                            className="flex-1 text-xs font-semibold py-1.5 rounded-lg border">Sign out</button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <p style={{ color: TEXT_MUTED }} className="text-[11px] mb-2">
+                    Sign in to back up your log and use it on more than one device. The app works
+                    without it — everything just stays on this device.
+                  </p>
+                  <div className="flex gap-1.5">
+                    <input type="email" inputMode="email" value={emailDraft} placeholder="you@example.com"
+                           onChange={(e) => setEmailDraft(e.target.value)}
+                           style={{ borderColor: BORDER, background: BG, color: TEXT_PRIMARY }}
+                           className="flex-1 min-w-0 text-xs px-2.5 py-1.5 rounded-lg border" />
+                    <button onClick={async () => {
+                              setAuthMsg("Sending…");
+                              const r = await sendMagicLink(emailDraft);
+                              setAuthMsg(r.ok ? "Check your email for a sign-in link." : r.error);
+                            }}
+                            style={{ background: ACCENT, color: BG }}
+                            className="shrink-0 text-xs font-semibold px-3 rounded-lg">Send link</button>
+                  </div>
+                </>
+              )}
+              {authMsg && <p style={{ color: TEXT_MUTED }} className="text-[11px] mt-2">{authMsg}</p>}
+            </div>
 
             <div style={{ borderColor: BORDER }} className="border-t pt-4">
               <p className="text-xs font-semibold mb-1">Backup</p>
@@ -1723,26 +1844,3 @@ function ExerciseList({ exercises, color }) {
   );
 }
 
-/* ------------------------------ Cloud backup ------------------------------ */
-
-/**
- * Best-effort copy to a Google Apps Script endpoint. Fire-and-forget: a
- * failure here must never block or break the local save, which is the real
- * source of truth. Inert until BACKUP_URL is set.
- */
-let backupTimer = null;
-function pushBackup(log) {
-  if (!BACKUP_URL) return;
-  clearTimeout(backupTimer);
-  backupTimer = setTimeout(() => {
-    try {
-      fetch(BACKUP_URL, {
-        method: "POST",
-        headers: { "Content-Type": "text/plain;charset=utf-8" },
-        body: JSON.stringify({ person: CLIENT_NAME, kind: "backup", payload: { log, syncedAt: new Date().toISOString() } }),
-      }).catch(() => {});
-    } catch {
-      /* offline or blocked — the local copy is unaffected */
-    }
-  }, 4000);
-}

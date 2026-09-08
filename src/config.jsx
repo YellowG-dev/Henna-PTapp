@@ -21,6 +21,12 @@ export const RAMP_WEEKS = 2;
 // Set once the Apps Script backup endpoint exists. Empty = feature off.
 export const BACKUP_URL = "";
 
+// Supabase connection. Safe to commit — the publishable key is designed to be
+// public and only says "a browser is calling". Row-level security is what
+// protects the data. NEVER put the sb_secret_ key here.
+export const SUPABASE_URL = "https://qpkdqyazdzhoohowkouy.supabase.co";
+export const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_VCvYuYUAC9Dnf3kiLNB93g_tP_5c473";
+
 const ACCENT = "#C97388";   // rose
 const ACCENT_2 = "#7FB88F"; // sage
 
