@@ -2,6 +2,9 @@
   "name": "codedev-pt-apps",
   "private": true,
   "description": "Shared libraries for the three PT apps. Lives in C:\\Users\\elojuh\\CodeDev\\ — the folder ABOVE juha-ptapp, henna-ptapp and Joonatan-PTapp. Node looks in parent folders for libraries, so installing once here serves all three repos. Do not commit node_modules to git.",
+ "scripts": {
+  "build": "esbuild src/entry.jsx --bundle --minify --outfile=bundle.js --loader:.jsx=jsx && tailwindcss -i ./src/input.css -o ./styles.css"
+},
   "dependencies": {
     "react": "19.2.8",
     "react-dom": "19.2.8",
