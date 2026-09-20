@@ -2,6 +2,7 @@
  * Henna — the only file that differs between clients (alongside her program
  * data). app.jsx imports from here and is byte-identical across every app.
  */
+import { THEMES, buildTheme } from "./core/themes.js";
 import React from "react";
 import { Dumbbell, Wind, Flower2, Heart, Flame, ExternalLink } from "lucide-react";
 import PROGRAM_DATA, { MOBILITY, BLOCKS, SLOT_OPTIONS, SLOT_META, APP_VERSION } from "./core/program-henna.js";
@@ -27,33 +28,27 @@ export const BACKUP_URL = "";
 export const SUPABASE_URL = "https://qpkdqyazdzhoohowkouy.supabase.co";
 export const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_VCvYuYUAC9Dnf3kiLNB93g_tP_5c473";
 
-const ACCENT = "#C97388";   // rose
-const ACCENT_2 = "#7FB88F"; // sage
+const { ACCENT, ACCENT_2 } = THEMES["rose-linen"];
 
-export const THEME = {
-  BG: "#FBF7F4",
-  CARD: "#FFFFFF",
-  BORDER: "#EADFD8",
-  TEXT_PRIMARY: "#2E2724",
-  TEXT_SECONDARY: "#7A6A62",
-  TEXT_MUTED: "#A2938B",
-  ACCENT,
-  ACCENT_2,
-  HEAT_RGB: "201,115,136",
-  FONT_DISPLAY: "'Fraunces', Georgia, serif",
-  FONT_BODY: "'Karla', system-ui, sans-serif",
-  FONT_MONO: "'IBM Plex Mono', ui-monospace, monospace",
-  FONT_IMPORT:
-    "https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Karla:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap",
-  CATS: {
-    strength: { label: "Strength", color: ACCENT, Icon: Dumbbell },
-    mobility: { label: "Mobility", color: ACCENT_2, Icon: Wind },
-    yoga: { label: "Yoga", color: "#A99BC9", Icon: Flower2 },
-    check: { label: "Check", color: "#96877E", Icon: Heart },
-    rest: { label: "Rest", color: "#B8A99F", Icon: Heart },
-    activity: { label: "Activity", color: "#E0A458", Icon: Flame },
-  },
+// Which theme this client opens with. Every palette now lives in
+// core/themes.js, shared byte-identically by all three repos; this file keeps
+// only what is genuinely per-client.
+export const DEFAULT_THEME_ID = "rose-linen";
+
+// Categories are CLIENT data, not theme data. The three apps do not have the
+// same ones, or even the same number of them, so a theme cannot own this list
+// without carrying categories the other apps never show.
+// The theme supplies colours; this file decides which categories exist.
+const CATS = {
+  strength: { label: "Strength", color: ACCENT, Icon: Dumbbell },
+  mobility: { label: "Mobility", color: ACCENT_2, Icon: Wind },
+  yoga: { label: "Yoga", color: "#A99BC9", Icon: Flower2 },
+  check: { label: "Check", color: "#96877E", Icon: Heart },
+  rest: { label: "Rest", color: "#B8A99F", Icon: Heart },
+  activity: { label: "Activity", color: "#E0A458", Icon: Flame },
 };
+
+export const THEME = buildTheme(DEFAULT_THEME_ID, CATS);
 
 /* ------------------------------ Program tab ------------------------------- */
 

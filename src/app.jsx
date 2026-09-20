@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import React, { useState, useEffect, useMemo, useCallback, useRef, createContext, useContext } from "react";
 import {
   Dumbbell, Wind, Flower2, Check, ExternalLink, ChevronDown, ChevronLeft,
   ChevronRight, Settings2, Flame, CalendarDays, Repeat, X, Heart, Ban,
@@ -30,18 +30,27 @@ import {
 
 /* --------------------------------- Config -------------------------------- */
 
-const {
-  BG, CARD, BORDER, TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED,
-  ACCENT, ACCENT_2, HEAT_RGB, FONT_DISPLAY, FONT_BODY, FONT_MONO, FONT_IMPORT, CATS,
-} = THEME;
+// The theme used to be destructured HERE, at module scope, which resolved it
+// exactly once when the bundle loaded. Nothing could change at runtime, so a
+// switcher was impossible. It now arrives through context and each component
+// destructures the same names from useTheme(), which is why all 315 existing
+// call sites are untouched — only the binding moved.
+//
+// OK_COLOR moved into the theme object too (see buildTheme in core/themes.js);
+// it derived from CATS, which is now per-theme data.
+const ThemeContext = createContext(THEME);
+
+/** Every colour, font and tint in the app. Call it first in a component. */
+function useTheme() {
+  return useContext(ThemeContext);
+}
 
 const store = createStore(localStorageAdapter(), STORAGE_PREFIX);
 
-// Green tick for a target that was met. Falls back to the mobility colour so
-// a theme that has not defined an explicit "ok" colour still looks right.
-const OK_COLOR = (CATS.mobility && CATS.mobility.color) || "#7FB88F";
-
 function FontImport() {
+  const { BG, CARD, BORDER, TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED, ACCENT, ACCENT_2,
+          HEAT_RGB, FONT_DISPLAY, FONT_BODY, FONT_MONO, FONT_IMPORT, CATS, OK_COLOR,
+          ON_ACCENT, TINT, BADGE } = useTheme();
   return (
     <style>{`
       @import url('${FONT_IMPORT}');
@@ -67,7 +76,10 @@ function setCountFor(task, ramp) {
 
 /* ---------------------------------- App ---------------------------------- */
 
-export default function HennaApp() {
+function AppInner() {
+  const { BG, CARD, BORDER, TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED, ACCENT, ACCENT_2,
+          HEAT_RGB, FONT_DISPLAY, FONT_BODY, FONT_MONO, FONT_IMPORT, CATS, OK_COLOR,
+          ON_ACCENT, TINT, BADGE } = useTheme();
   const today = useMemo(() => new Date(), []);
   const todayKey = dateKey(today);
 
@@ -727,7 +739,7 @@ export default function HennaApp() {
         <div className="flex gap-1 p-1 rounded-xl border mt-3" style={{ borderColor: BORDER, background: CARD }}>
           {[["today", "Today"], ["calendar", "Calendar"], ["history", "Progress"], ["program", "Program"]].map(([k, label]) => (
             <button key={k} onClick={() => setView(k)}
-                    style={{ background: view === k ? ACCENT : "transparent", color: view === k ? "#fff" : TEXT_SECONDARY }}
+                    style={{ background: view === k ? ACCENT : "transparent", color: view === k ? ON_ACCENT : TEXT_SECONDARY }}
                     className="flex-1 text-[11px] font-semibold py-1.5 rounded-lg">
               {label}
             </button>
@@ -821,7 +833,7 @@ export default function HennaApp() {
                                 aria-label="Toggle sharing with your coach"
                                 style={{ background: sharing.enabled ? ACCENT : BORDER, opacity: sharingBusy ? 0.6 : 1 }}
                                 className="shrink-0 w-11 h-6 rounded-full relative transition-colors">
-                          <span style={{ background: "#fff", left: sharing.enabled ? 22 : 3 }}
+                          <span style={{ background: ON_ACCENT, left: sharing.enabled ? 22 : 3 }}
                                 className="absolute top-0.5 w-5 h-5 rounded-full transition-all shadow-sm" />
                         </button>
                       )}
@@ -892,7 +904,7 @@ export default function HennaApp() {
                           aria-pressed={on}
                           style={{
                             background: on ? CATS.check.color : "transparent",
-                            color: on ? "#fff" : TEXT_SECONDARY,
+                            color: on ? ON_ACCENT : TEXT_SECONDARY,
                             borderColor: on ? CATS.check.color : BORDER,
                           }}
                           className="text-[11px] font-semibold px-2.5 py-1 rounded-lg border">
@@ -910,25 +922,25 @@ export default function HennaApp() {
 
             <div className="flex items-center gap-2 mt-3 flex-wrap">
               {info.skip && (
-                <span style={{ background: "rgba(136,145,163,0.16)", color: CATS.check.color, borderColor: "rgba(136,145,163,0.45)" }}
+                <span style={{ background: BADGE.neutral.tint, color: CATS.check.color, borderColor: BADGE.neutral.border }}
                       className="text-[11px] px-2 py-0.5 rounded-full border font-medium flex items-center gap-1">
                   <Ban size={11} /> {info.skipLabel} day
                 </span>
               )}
               {ramp && (
-                <span style={{ background: "rgba(127,184,143,0.16)", color: "#4C7A5A", borderColor: "rgba(127,184,143,0.45)" }}
+                <span style={{ background: BADGE.ramp.tint, color: BADGE.ramp.text, borderColor: BADGE.ramp.border }}
                       className="text-[11px] px-2 py-0.5 rounded-full border font-medium">
                   Week {weeksSinceStart(viewedDate) + 1} · easing in
                 </span>
               )}
               {gentler && (
-                <span style={{ background: "rgba(201,115,136,0.14)", color: ACCENT, borderColor: "rgba(201,115,136,0.4)" }}
+                <span style={{ background: BADGE.gentler.tint, color: ACCENT, borderColor: BADGE.gentler.border }}
                       className="text-[11px] px-2 py-0.5 rounded-full border font-medium">
                   Gentler week
                 </span>
               )}
               {info.anyMoved && (
-                <span style={{ background: "rgba(169,155,201,0.16)", color: "#6D5F91", borderColor: "rgba(169,155,201,0.45)" }}
+                <span style={{ background: BADGE.moved.tint, color: BADGE.moved.text, borderColor: BADGE.moved.border }}
                       className="text-[11px] px-2 py-0.5 rounded-full border font-medium">
                   Rearranged
                 </span>
@@ -1025,7 +1037,7 @@ export default function HennaApp() {
                             <div className="flex items-center gap-3">
                               <span style={{ background: has ? cat.color : "transparent", borderColor: has ? cat.color : BORDER }}
                                     className="shrink-0 w-5 h-5 rounded-full border-2 flex items-center justify-center">
-                                {has && <Check size={12} strokeWidth={3} color="#fff" />}
+                                {has && <Check size={12} strokeWidth={3} color={ON_ACCENT} />}
                               </span>
                               <div className="min-w-0">
                                 <p className="text-sm font-medium">{task.name}</p>
@@ -1037,7 +1049,7 @@ export default function HennaApp() {
                                 <button key={n} onClick={() => setScale(task.id, n)}
                                         style={{
                                           background: value === n ? cat.color : "transparent",
-                                          color: value === n ? "#fff" : TEXT_SECONDARY,
+                                          color: value === n ? ON_ACCENT : TEXT_SECONDARY,
                                           borderColor: value === n ? cat.color : BORDER,
                                         }}
                                         className="w-9 h-9 text-sm font-semibold rounded-lg border">
@@ -1060,7 +1072,7 @@ export default function HennaApp() {
                             <div className="flex items-center gap-3">
                               <span style={{ background: has ? cat.color : "transparent", borderColor: has ? cat.color : BORDER }}
                                     className="shrink-0 w-5 h-5 rounded-full border-2 flex items-center justify-center">
-                                {has && <Check size={12} strokeWidth={3} color="#fff" />}
+                                {has && <Check size={12} strokeWidth={3} color={ON_ACCENT} />}
                               </span>
                               <div className="min-w-0">
                                 <p className="text-sm font-medium">{task.name}</p>
@@ -1073,7 +1085,7 @@ export default function HennaApp() {
                                         onClick={() => setChoice(task, picked === opt.value ? null : opt.value)}
                                         style={{
                                           background: picked === opt.value ? cat.color : "transparent",
-                                          color: picked === opt.value ? "#fff" : TEXT_SECONDARY,
+                                          color: picked === opt.value ? ON_ACCENT : TEXT_SECONDARY,
                                           borderColor: picked === opt.value ? cat.color : BORDER,
                                         }}
                                         className="text-xs font-semibold px-3 py-1.5 rounded-lg border">
@@ -1115,7 +1127,7 @@ export default function HennaApp() {
                           <div key={task.id} style={border} className="flex items-center gap-3 px-4 py-3">
                             <span style={{ background: has ? dotColor : "transparent", borderColor: has ? dotColor : BORDER }}
                                   className="shrink-0 w-5 h-5 rounded-full border-2 flex items-center justify-center">
-                              {has && <Check size={12} strokeWidth={3} color="#fff" />}
+                              {has && <Check size={12} strokeWidth={3} color={ON_ACCENT} />}
                             </span>
                             <div className="flex-1 min-w-0">
                               <p className="text-sm font-medium">{task.name}</p>
@@ -1165,7 +1177,7 @@ export default function HennaApp() {
                                className="flex items-center gap-3 px-4 py-3 cursor-pointer select-none">
                             <span style={{ background: checked || isSub ? cat.color : "transparent", borderColor: checked || isSub ? cat.color : BORDER }}
                                   className="shrink-0 w-5 h-5 rounded-full border-2 flex items-center justify-center">
-                              {isSub ? <Repeat size={11} strokeWidth={3} color="#fff" /> : checked && <Check size={12} strokeWidth={3} color="#fff" />}
+                              {isSub ? <Repeat size={11} strokeWidth={3} color={ON_ACCENT} /> : checked && <Check size={12} strokeWidth={3} color={ON_ACCENT} />}
                             </span>
                             <div className="flex-1 min-w-0">
                               <p style={{ color: checked && !isSub ? TEXT_MUTED : TEXT_PRIMARY, textDecoration: checked && !isSub ? "line-through" : "none" }}
@@ -1211,7 +1223,7 @@ export default function HennaApp() {
                                 return (
                                   <>
                                     {lastNote && (
-                                      <p style={{ background: "rgba(201,115,136,0.1)", color: ACCENT, borderColor: "rgba(201,115,136,0.3)" }}
+                                      <p style={{ background: TINT.soft, color: ACCENT, borderColor: TINT.softBorder }}
                                          className="text-[11px] px-2 py-1 rounded-md border">📌 {lastNote}</p>
                                     )}
                                     {last && (
@@ -1264,7 +1276,7 @@ export default function HennaApp() {
                                         return (
                                           <div style={{ borderColor: BORDER }} className="pt-2 border-t space-y-1.5">
                                             <div className="flex items-center gap-2 flex-wrap">
-                                              <span style={{ background: cat.color, color: "#fff" }}
+                                              <span style={{ background: cat.color, color: ON_ACCENT }}
                                                     className="text-[11px] font-semibold px-2 py-1 rounded-lg flex items-center gap-1.5">
                                                 <Repeat size={11} /> Doing: {sub.name}
                                               </span>
@@ -1279,7 +1291,7 @@ export default function HennaApp() {
                                                 <button key={rsn} onClick={(e) => { e.stopPropagation(); setSwapReason(task.id, rsn); }}
                                                         style={{
                                                           background: sub.reason === rsn ? cat.color : "transparent",
-                                                          color: sub.reason === rsn ? "#fff" : TEXT_SECONDARY,
+                                                          color: sub.reason === rsn ? ON_ACCENT : TEXT_SECONDARY,
                                                           borderColor: sub.reason === rsn ? cat.color : BORDER,
                                                         }}
                                                         className="text-[10px] font-semibold px-2 py-0.5 rounded-lg border capitalize">
@@ -1334,7 +1346,7 @@ export default function HennaApp() {
                                                           setSwapFree((p) => ({ ...p, [task.id]: "" }));
                                                           setSwapOpen(null);
                                                         }}
-                                                        style={{ background: cat.color, color: "#fff" }}
+                                                        style={{ background: cat.color, color: ON_ACCENT }}
                                                         className="shrink-0 text-[11px] font-semibold px-3 rounded-lg">Use</button>
                                               </div>
                                             </div>
@@ -1345,7 +1357,7 @@ export default function HennaApp() {
 
                                     {task.altName && (
                                       <button onClick={(e) => { e.stopPropagation(); toggleAlt(task.id, task.altName); }}
-                                              style={{ color: isSub ? "#fff" : cat.color, background: isSub ? cat.color : "transparent", borderColor: cat.color }}
+                                              style={{ color: isSub ? ON_ACCENT : cat.color, background: isSub ? cat.color : "transparent", borderColor: cat.color }}
                                               className="text-[11px] font-semibold flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border">
                                         <Repeat size={12} />
                                         {isSub ? `Doing: ${task.altName} — switch back` : `Easier option: ${task.altName}`}
@@ -1509,6 +1521,9 @@ export default function HennaApp() {
 /* ------------------------------ Sub-components ---------------------------- */
 
 function ChartCard({ title, note, data, color, domain, unit, kind, totalWindow, reference, referenceLabel, hideValue }) {
+  const { BG, CARD, BORDER, TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED, ACCENT, ACCENT_2,
+          HEAT_RGB, FONT_DISPLAY, FONT_BODY, FONT_MONO, FONT_IMPORT, CATS, OK_COLOR,
+          ON_ACCENT, TINT, BADGE } = useTheme();
   const latest = data[data.length - 1];
   const isTotal = kind === "total";
   const lineKey = isTotal ? "total" : "avg";
@@ -1567,6 +1582,9 @@ function getMonthMatrix(year, month) {
 }
 
 function CalendarView(p) {
+  const { BG, CARD, BORDER, TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED, ACCENT, ACCENT_2,
+          HEAT_RGB, FONT_DISPLAY, FONT_BODY, FONT_MONO, FONT_IMPORT, CATS, OK_COLOR,
+          ON_ACCENT, TINT, BADGE } = useTheme();
   const weeks = useMemo(() => getMonthMatrix(p.calYear, p.calMonth), [p.calYear, p.calMonth]);
   const selInfo = useMemo(() => resolveSchedule(p.calSelected, "auto", p.overrides, PROGRAM), [p.calSelected, p.overrides]);
   const block = selInfo.slots.strength ? BLOCKS.strength[selInfo.slots.strength] : null;
@@ -1606,7 +1624,7 @@ function CalendarView(p) {
       </div>
 
       {p.moveSource && (
-        <div style={{ background: "rgba(201,115,136,0.1)", borderColor: ACCENT }} className="flex items-center justify-between gap-2 rounded-xl border px-3 py-2 mb-3">
+        <div style={{ background: TINT.soft, borderColor: ACCENT }} className="flex items-center justify-between gap-2 rounded-xl border px-3 py-2 mb-3">
           <p className="text-xs">Moving {SLOT_META[p.moveSource.slot].label.toLowerCase()} — tap the day to swap it with.</p>
           <button onClick={() => p.setMoveSource(null)} style={{ color: ACCENT }} className="text-xs font-semibold shrink-0">Cancel</button>
         </div>
@@ -1638,7 +1656,7 @@ function CalendarView(p) {
                           background: deloadOn ? ACCENT : "transparent",
                           borderColor: deloadOn ? ACCENT : suggested ? ACCENT + "80" : BORDER,
                           borderStyle: suggested && !deloadOn ? "dashed" : "solid",
-                          color: deloadOn ? "#fff" : TEXT_MUTED,
+                          color: deloadOn ? ON_ACCENT : TEXT_MUTED,
                         }}
                         className="shrink-0 w-7 self-stretch rounded-md border flex items-center justify-center text-[10px] font-bold">
                   D
@@ -1652,7 +1670,7 @@ function CalendarView(p) {
                   const i = resolveSchedule(d, "auto", p.overrides, PROGRAM);
                   return (
                     <button key={dateKey(d)} onClick={() => pick(d)}
-                            style={{ background: isSel ? "rgba(201,115,136,0.12)" : i.deload === true ? ACCENT + "14" : CARD,
+                            style={{ background: isSel ? TINT.selected : i.deload === true ? ACCENT + "14" : CARD,
                                      borderColor: isToday ? ACCENT : BORDER,
                                      borderWidth: isToday ? 2 : 1,
                                      borderStyle: i.anyMoved ? "dashed" : "solid",
@@ -1710,7 +1728,7 @@ function CalendarView(p) {
                 <button key={r.value} onClick={() => p.setSkip(p.calSelected, on ? null : r.value)}
                         aria-pressed={on}
                         style={{ background: on ? CATS.check.color : "transparent",
-                                 color: on ? "#fff" : TEXT_SECONDARY,
+                                 color: on ? ON_ACCENT : TEXT_SECONDARY,
                                  borderColor: on ? CATS.check.color : BORDER }}
                         className="text-[11px] font-semibold px-2.5 py-1 rounded-lg border">
                   {r.label}
@@ -1743,7 +1761,7 @@ function CalendarView(p) {
                     {blk ? blk.label : `No ${meta.label.toLowerCase()}`}
                   </p>
                   {selInfo.moved[slotName] && (
-                    <span style={{ background: "rgba(169,155,201,0.16)", color: "#6D5F91", borderColor: "rgba(169,155,201,0.45)" }}
+                    <span style={{ background: BADGE.moved.tint, color: BADGE.moved.text, borderColor: BADGE.moved.border }}
                           className="text-[10px] px-1.5 py-0.5 rounded-full border font-medium shrink-0">Moved</span>
                   )}
                 </div>
@@ -1771,7 +1789,7 @@ function CalendarView(p) {
                     <button key={String(opt.value)}
                             onClick={() => { p.setBlock(p.calSelected, slotName, opt.value); p.setEditingBlock(null); }}
                             style={{ background: value === opt.value ? meta.color : "transparent",
-                                     color: value === opt.value ? "#fff" : TEXT_SECONDARY,
+                                     color: value === opt.value ? ON_ACCENT : TEXT_SECONDARY,
                                      borderColor: value === opt.value ? meta.color : BORDER }}
                             className="text-[11px] font-semibold px-2.5 py-1 rounded-lg border">
                       {opt.label}
@@ -1851,7 +1869,7 @@ function CalendarView(p) {
                    placeholder="e.g. Long walk 45 min"
                    style={{ borderColor: BORDER, background: BG }} className="flex-1 min-w-0 text-xs px-2.5 py-1.5 rounded-lg border" />
             <button onClick={() => { p.addActivity(p.calSelected, p.activityDraft); p.setActivityDraft(""); }}
-                    style={{ background: CATS.activity.color, color: "#fff" }} className="shrink-0 text-xs font-semibold px-3 rounded-lg">Add</button>
+                    style={{ background: CATS.activity.color, color: ON_ACCENT }} className="shrink-0 text-xs font-semibold px-3 rounded-lg">Add</button>
           </div>
         </div>
       </div>
@@ -1860,6 +1878,9 @@ function CalendarView(p) {
 }
 
 function Section({ title, subtitle, color, defaultOpen, children }) {
+  const { BG, CARD, BORDER, TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED, ACCENT, ACCENT_2,
+          HEAT_RGB, FONT_DISPLAY, FONT_BODY, FONT_MONO, FONT_IMPORT, CATS, OK_COLOR,
+          ON_ACCENT, TINT, BADGE } = useTheme();
   const [open, setOpen] = useState(Boolean(defaultOpen));
   return (
     <div style={{ background: CARD, borderColor: BORDER }} className="rounded-2xl border overflow-hidden">
@@ -1877,6 +1898,9 @@ function Section({ title, subtitle, color, defaultOpen, children }) {
 }
 
 function ExerciseList({ exercises, color }) {
+  const { BG, CARD, BORDER, TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED, ACCENT, ACCENT_2,
+          HEAT_RGB, FONT_DISPLAY, FONT_BODY, FONT_MONO, FONT_IMPORT, CATS, OK_COLOR,
+          ON_ACCENT, TINT, BADGE } = useTheme();
   return (
     <div className="space-y-1.5">
       {exercises.map((e) => (
@@ -1894,3 +1918,18 @@ function ExerciseList({ exercises, color }) {
   );
 }
 
+
+/**
+ * Supplies the theme to the whole tree.
+ *
+ * Phase 0 hands over the single theme this client already used, so nothing
+ * changes visually. Phase 3 replaces the constant with state plus a stored
+ * setting, and the switcher works without touching any call site.
+ */
+export default function HennaApp() {
+  return (
+    <ThemeContext.Provider value={THEME}>
+      <AppInner />
+    </ThemeContext.Provider>
+  );
+}
