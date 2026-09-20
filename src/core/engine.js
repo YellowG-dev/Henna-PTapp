@@ -109,17 +109,41 @@ export function resolveSchedule(date, weekOverride, overrides, program) {
 export function suggestDeloadWeek(date, program) {
   const wave = program && program.deloadWave;
   if (!wave || !wave.anchor) return false;
+  const waveAnchor = toDate(wave.anchor);
+  if (!waveAnchor) return false;
   const mondayOf = (d) => {
     const dow = (d.getDay() + 6) % 7;
     const m = new Date(d);
     m.setDate(m.getDate() - dow);
     return m;
   };
-  const diff = daysBetween(mondayOf(wave.anchor), mondayOf(date));
+  const diff = daysBetween(mondayOf(waveAnchor), mondayOf(date));
   if (diff < 0) return false;
   const cycle = wave.cycleWeeks || 4;
   const target = wave.deloadWeek != null ? wave.deloadWeek : cycle - 1;
   return Math.floor(diff / 7) % cycle === target;
+}
+
+
+/* --------------------------------- Anchors -------------------------------- */
+
+/**
+ * Program anchors are declared as ISO date strings ("2026-09-06"), because a
+ * program has to survive being stored as JSON and pasted back in. Date objects
+ * are still accepted so nothing breaks if one turns up.
+ *
+ * Parsed as a LOCAL date on purpose. new Date("2026-09-06") is midnight UTC,
+ * which is the previous calendar day in the Americas and the same day here —
+ * a bug that would appear only for some users, and only sometimes. Everything
+ * else in this engine compares local year/month/day, so anchors must too.
+ */
+function toDate(value) {
+  if (!value) return null;
+  if (value instanceof Date) return isNaN(value.getTime()) ? null : value;
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value));
+  if (!m) return null;
+  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  return isNaN(d.getTime()) ? null : d;
 }
 
 /* -------------------------------- Testing -------------------------------- */
@@ -143,8 +167,9 @@ export function resolveTesting(date, overrides, program) {
     const ovKey = `test:${item.id}`;
     const isOverridden = Object.prototype.hasOwnProperty.call(ov, ovKey);
     let auto = false;
-    if (item.anchor && item.everyDays) {
-      const diff = daysBetween(item.anchor, date);
+    const itemAnchor = toDate(item.anchor);
+    if (itemAnchor && item.everyDays) {
+      const diff = daysBetween(itemAnchor, date);
       auto = diff >= 0 && diff % item.everyDays === 0;
     }
     return {
@@ -278,14 +303,23 @@ export function buildSections(date, opts, program) {
 
   for (const daily of program.daily || []) {
     if (daily.dayOfWeek != null && daily.dayOfWeek !== date.getDay()) continue;
-    const ctx = { isTrainingDay: info.isTrainingDay, skip: info.skip };
-    const tasks = typeof daily.tasks === "function" ? daily.tasks(ctx) : daily.tasks;
-    const title = typeof daily.title === "function" ? daily.title(ctx) : daily.title;
+    // A daily section may declare `byDayType: { training, rest }` when its
+    // content differs on training and rest days — nutrition targets, for
+    // instance. Everything declared on the section itself still applies; the
+    // variant only overrides what it names. Closures used to do this job and
+    // are gone deliberately: a program must be plain data to be stored and
+    // validated outside the app.
+    const variant = daily.byDayType
+      ? (info.isTrainingDay ? daily.byDayType.training : daily.byDayType.rest) || {}
+      : {};
+    const tasks = variant.tasks || daily.tasks || [];
+    const title = variant.title != null ? variant.title : daily.title;
+    const subtitle = variant.subtitle != null ? variant.subtitle : daily.subtitle;
     sections.push({
       key: daily.key,
       cat: daily.cat,
       title: title,
-      subtitle: daily.subtitle || null,
+      subtitle: subtitle || null,
       tasks: tasks.map((e) => mapTask(e, opt)),
     });
   }
