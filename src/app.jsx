@@ -21,7 +21,8 @@ import {
 import { variantsFor } from "./core/patterns.js";
 import { computeStreak, buildHeatmapCells } from "./core/stats.js";
 import { createStore, localStorageAdapter } from "./core/storage.js";
-import { isConfigured, currentUser, onAuthChange, sendMagicLink, signOut } from "./core/supabase.js";
+import { isConfigured, currentUser, onAuthChange, sendMagicLink, signOut,
+         getCoachSharing, setCoachSharing } from "./core/supabase.js";
 import {
   configureSync, pullAndMerge, queueLogDay, queueOverrideChanges,
   queueSettings, flushNow, watchConnectivity,
@@ -100,7 +101,27 @@ export default function HennaApp() {
   const [syncState, setSyncState] = useState({ status: "offline", pendingCount: 0, lastSyncedAt: null });
   const [emailDraft, setEmailDraft] = useState("");
   const [authMsg, setAuthMsg] = useState("");
+  // { linked, enabled } — linked false means no coach, which is not the same
+  // as linked with sharing switched off.
+  const [sharing, setSharing] = useState({ linked: false, enabled: null });
+  const [sharingBusy, setSharingBusy] = useState(false);
   const syncedUserRef = useRef(null);
+
+  // Sharing state follows the session. Signed out, there is nothing to ask
+  // about; signed in, this is read once rather than watched, because the only
+  // thing that changes it is the toggle below.
+  useEffect(() => {
+    let dead = false;
+    if (!authUser) {
+      setSharing({ linked: false, enabled: null });
+      return;
+    }
+    (async () => {
+      const state = await getCoachSharing();
+      if (!dead) setSharing(state);
+    })();
+    return () => { dead = true; };
+  }, [authUser]);
   const [copyStatus, setCopyStatus] = useState("");
   const [importStatus, setImportStatus] = useState("");
   const [selectedExerciseId, setSelectedExerciseId] = useState(null);
@@ -183,10 +204,15 @@ export default function HennaApp() {
   // Precedence: the weekly D toggle (an override) beats the day's stored
   // flag, which beats the app-wide setting. The 4th-week wave only SUGGESTS.
   const dayOverrideDeload = overrides[viewedKey]?.deload;
+  // Precedence, after the app-wide toggle was removed: the week-scoped
+  // Calendar toggle (an override) beats the day's stored flag, and there is
+  // no third level any more. The old settings.gentler is deliberately not
+  // read — two controls that shared behaviour but not display state could
+  // each show "off" while the day was actually gentle.
   const gentler =
     typeof dayOverrideDeload === "boolean" ? dayOverrideDeload
     : typeof rec?.gentler === "boolean" ? rec.gentler
-    : settings.gentler;
+    : false;
 
   /* ------------------------ Reset drafts on day change -------------------- */
 
@@ -710,23 +736,6 @@ export default function HennaApp() {
 
         {settingsOpen && (
           <div style={{ background: CARD, borderColor: BORDER }} className="mt-3 rounded-2xl border p-4 space-y-4">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-xs font-semibold">Gentler week</p>
-                <p style={{ color: TEXT_MUTED }} className="text-[11px] mt-0.5">
-                  One less set, bottom of the rep range, lighter weight. Use it whenever you need it — it's part of
-                  the plan, not falling behind.
-                </p>
-              </div>
-              <button onClick={() => updateSettings({ gentler: !settings.gentler })}
-                      aria-pressed={settings.gentler} aria-label="Toggle gentler week"
-                      style={{ background: settings.gentler ? ACCENT : BORDER }}
-                      className="shrink-0 w-11 h-6 rounded-full relative transition-colors">
-                <span style={{ background: "#fff", left: settings.gentler ? 22 : 3 }}
-                      className="absolute top-0.5 w-5 h-5 rounded-full transition-all shadow-sm" />
-              </button>
-            </div>
-
             {PROGRAM.usesHeartRate && (
               <div style={{ borderColor: BORDER }} className="border-t pt-4">
                 <p className="text-xs font-semibold mb-1">Max heart rate</p>
@@ -776,6 +785,47 @@ export default function HennaApp() {
                             }}
                             style={{ borderColor: BORDER }}
                             className="flex-1 text-xs font-semibold py-1.5 rounded-lg border">Sign out</button>
+                  </div>
+
+                  <div style={{ borderColor: BORDER }} className="border-t mt-3 pt-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-xs font-semibold">Share with your coach</p>
+                        <p style={{ color: TEXT_MUTED }} className="text-[11px] mt-0.5">
+                          {!sharing.linked
+                            ? "No coach is linked to this account, so nothing is being shared."
+                            : sharing.enabled
+                            ? "Your coach can see your logged sessions. Switch this off any time — your log stays exactly as it is, it just stops being visible to them."
+                            : "Sharing is off. Your coach cannot see your sessions. Nothing has been deleted — switching it back on makes everything visible again."}
+                        </p>
+                      </div>
+                      {sharing.linked && (
+                        <button onClick={async () => {
+                                  const next = !sharing.enabled;
+                                  setSharingBusy(true);
+                                  setSharing((prev) => ({ ...prev, enabled: next }));
+                                  const r = await setCoachSharing(next);
+                                  setSharingBusy(false);
+                                  if (!r.ok) {
+                                    // Put the switch back where it was: a failed
+                                    // write must never leave the UI claiming a
+                                    // privacy setting that did not take effect.
+                                    setSharing((prev) => ({ ...prev, enabled: !next }));
+                                    setAuthMsg(r.error || "Could not change sharing.");
+                                  } else {
+                                    setAuthMsg(next ? "Sharing is on." : "Sharing is off.");
+                                  }
+                                }}
+                                disabled={sharingBusy}
+                                aria-pressed={Boolean(sharing.enabled)}
+                                aria-label="Toggle sharing with your coach"
+                                style={{ background: sharing.enabled ? ACCENT : BORDER, opacity: sharingBusy ? 0.6 : 1 }}
+                                className="shrink-0 w-11 h-6 rounded-full relative transition-colors">
+                          <span style={{ background: "#fff", left: sharing.enabled ? 22 : 3 }}
+                                className="absolute top-0.5 w-5 h-5 rounded-full transition-all shadow-sm" />
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </>
               ) : (

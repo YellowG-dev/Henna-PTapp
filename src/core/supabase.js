@@ -122,3 +122,54 @@ export async function signOut() {
     /* already gone, or offline — nothing to do */
   }
 }
+
+/* ------------------------------ Coach sharing ----------------------------- */
+//
+// Whether this person's coach can currently read their training data. The
+// switch belongs to the client and nobody else: set_coach_sharing() is
+// SECURITY DEFINER and updates only rows where client_id = auth.uid(), so a
+// coach cannot turn a client's sharing back on.
+//
+// Note the asymmetry worth knowing about here: a coach has coach_links rows
+// where they are the *coach*, and a client has a row where they are the
+// *client*. Both are visible under the same policy, so the query below must
+// filter on client_id explicitly — selecting the table unfiltered would hand
+// a coach their clients' rows and make it look like they were being coached.
+
+/**
+ * This account's sharing state.
+ * Resolves to { linked, enabled } — linked false means nobody is coaching
+ * them, which is different from being linked with sharing switched off.
+ * Never throws.
+ */
+export async function getCoachSharing() {
+  const c = getClient();
+  if (!c) return { linked: false, enabled: null };
+  try {
+    const u = await currentUser();
+    if (!u) return { linked: false, enabled: null };
+    const { data, error } = await c
+      .from("coach_links")
+      .select("sharing_enabled")
+      .eq("client_id", u.id);
+    if (error || !data || data.length === 0) return { linked: false, enabled: null };
+    // More than one coach is not a current scenario, but if it ever happens,
+    // "sharing" means sharing with all of them.
+    return { linked: true, enabled: data.every((row) => row.sharing_enabled !== false) };
+  } catch (e) {
+    return { linked: false, enabled: null };
+  }
+}
+
+/** Turn coach sharing on or off. Resolves to { ok, error }. Never throws. */
+export async function setCoachSharing(enabled) {
+  const c = getClient();
+  if (!c) return { ok: false, error: "Not connected to an account." };
+  try {
+    const { error } = await c.rpc("set_coach_sharing", { enabled: Boolean(enabled) });
+    if (error) return { ok: false, error: error.message };
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: "Could not reach the server." };
+  }
+}
