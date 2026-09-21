@@ -504,6 +504,28 @@ function AppInner({ setThemeId }) {
   );
 
   const countable = useMemo(() => countableTasks(sections), [sections]);
+
+  // Train tab. The same section objects Today renders, filtered - no second
+  // definition of a session, so the ring and history cannot disagree with it.
+  const trainSections = useMemo(() => sections.filter((s) => s.cat === "strength"), [sections]);
+  const trainTasks = useMemo(() => countableTasks(trainSections), [trainSections]);
+  const trainDone = trainTasks.filter((t) => isTaskDone(t, rec)).length;
+  // Nothing to lift today: find the next scheduled strength session, same
+  // resolution rule buildSections uses (slot value -> block -> cat).
+  const nextStrength = useMemo(() => {
+    if (trainSections.length) return null;
+    for (let i = 1; i <= 42; i++) {
+      const d = new Date(viewedDate);
+      d.setDate(d.getDate() + i);
+      const s = resolveSchedule(d, "auto", overrides, PROGRAM);
+      for (const slot of PROGRAM.slots) {
+        const v = s.slots[slot];
+        const block = v && PROGRAM.blocks[slot] && PROGRAM.blocks[slot][v];
+        if (block && (block.cat || slot) === "strength") return { date: d, label: block.label };
+      }
+    }
+    return null;
+  }, [trainSections, viewedDate, overrides]);
   const doneCount = countable.filter((t) => isTaskDone(t, rec)).length;
   const pct = countable.length ? doneCount / countable.length : 0;
 
@@ -717,7 +739,7 @@ function AppInner({ setThemeId }) {
                className="text-[10px] uppercase font-semibold">
               {CLIENT_LABEL}
             </p>
-            {view === "today" ? (
+            {view === "today" || view === "train" ? (
               <div className="flex items-center gap-1 mt-1 -ml-1.5">
                 <button onClick={() => setDayOffset((o) => o - 1)} aria-label="Previous day"
                         style={{ color: TEXT_MUTED }} className="shrink-0 p-1.5 rounded-lg">
@@ -745,7 +767,7 @@ function AppInner({ setThemeId }) {
         </div>
 
         <div className="flex gap-1 p-1 rounded-xl border mt-3" style={{ borderColor: BORDER, background: CARD }}>
-          {[["today", "Today"], ["calendar", "Calendar"], ["history", "Progress"], ["program", "Program"]].map(([k, label]) => (
+          {[["today", "Today"], ["train", "Train"], ["calendar", "Calendar"], ["history", "Progress"], ["program", "Program"]].map(([k, label]) => (
             <button key={k} onClick={() => setView(k)}
                     style={{ background: view === k ? ACCENT : "transparent", color: view === k ? ON_ACCENT : TEXT_SECONDARY }}
                     className="flex-1 text-[11px] font-semibold py-1.5 rounded-lg">
@@ -1012,28 +1034,122 @@ function AppInner({ setThemeId }) {
             </div>
           </>
         )}
+
+        {view === "train" && (
+          <div className="flex items-center gap-2 mt-3 flex-wrap">
+            {trainTasks.length > 0 && (
+              <span style={{ fontFamily: FONT_MONO, color: TEXT_SECONDARY }} className="text-xs">
+                {trainDone} of {trainTasks.length} exercises done
+              </span>
+            )}
+            {trainTasks.length > 0 && ramp && (
+              <span style={{ background: BADGE.ramp.tint, color: BADGE.ramp.text, borderColor: BADGE.ramp.border }}
+                    className="text-[11px] px-2 py-0.5 rounded-full border font-medium">
+                Week {weeksSinceStart(viewedDate) + 1} · easing in
+              </span>
+            )}
+            {trainTasks.length > 0 && gentler && (
+              <span style={{ background: BADGE.gentler.tint, color: ACCENT, borderColor: BADGE.gentler.border }}
+                    className="text-[11px] px-2 py-0.5 rounded-full border font-medium">
+                Gentler week
+              </span>
+            )}
+            {dayOffset !== 0 && (
+              <button onClick={() => setDayOffset(0)} style={{ color: ACCENT }} className="text-[11px] font-semibold">
+                Back to today
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
+      {/* ------------------------------- Train -------------------------------- */}
+      {view === "train" && trainSections.length === 0 && (
+        <div className="px-4 max-w-md mx-auto">
+          <div style={{ background: CARD, borderColor: BORDER }} className="rounded-2xl border p-5 text-center">
+            <Dumbbell size={20} style={{ color: TEXT_MUTED }} className="mx-auto mb-2" />
+            <p className="text-sm font-semibold">
+              {info.skip ? `${info.skipLabel} day — training cleared` : "No strength session this day"}
+            </p>
+            {nextStrength ? (
+              <>
+                <p style={{ color: TEXT_MUTED }} className="text-xs mt-1">
+                  Next: {nextStrength.label} · {nextStrength.date.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" })}
+                </p>
+                <button onClick={() => setDayOffset(daysBetween(today, nextStrength.date))}
+                        style={{ color: ACCENT, borderColor: ACCENT }}
+                        className="mt-3 text-xs font-semibold px-3 py-1.5 rounded-lg border">
+                  Go to that day
+                </button>
+              </>
+            ) : (
+              <p style={{ color: TEXT_MUTED }} className="text-xs mt-1">None scheduled in the next six weeks.</p>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* ------------------------------- Today -------------------------------- */}
-      {view === "today" && (
+      {(view === "today" || (view === "train" && trainSections.length > 0)) && (
         <div className="px-4 max-w-md mx-auto space-y-3">
-          {sections.map((section) => {
+          {(view === "train" ? trainSections : sections).map((section) => {
+            const inTrain = view === "train";
             const cat = CATS[section.cat] || CATS.check;
             const Icon = cat.Icon;
             const plainIds = section.tasks.filter((t) => !t.type || t.type === "exercise").map((t) => t.id);
             const allDone = plainIds.length > 0 && plainIds.every((id) => rec?.done?.[id]);
             const hasTasks = section.tasks.length > 0;
             const defaultOpen = !["strength", "mobility"].includes(section.key);
-            const isOpen = sectionOpen[section.key] !== undefined ? sectionOpen[section.key] : defaultOpen;
+            const isOpen = inTrain || (sectionOpen[section.key] !== undefined ? sectionOpen[section.key] : defaultOpen);
+            const toggle = hasTasks && !inTrain;
+
+            // Today: strength collapses to a summary. The session itself is
+            // logged in Train; ticks and "All" still work here unchanged.
+            if (!inTrain && section.cat === "strength") {
+              const sTasks = section.tasks.filter((t) => t.type !== "notes");
+              const sDone = sTasks.filter((t) => isTaskDone(t, rec)).length;
+              return (
+                <div key={section.key} style={{ background: CARD, borderColor: BORDER }}
+                     className="rounded-2xl border overflow-hidden">
+                  <div style={{ borderLeftColor: cat.color }} className="border-l-4 px-4 py-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <Icon size={15} style={{ color: cat.color }} className="shrink-0" />
+                        <h2 style={{ fontFamily: FONT_DISPLAY }} className="text-sm font-semibold truncate">{section.title}</h2>
+                      </div>
+                      <div className="flex items-center gap-3 shrink-0">
+                        <span style={{ fontFamily: FONT_MONO, color: TEXT_SECONDARY }} className="text-[11px]">
+                          {sDone}/{sTasks.length}
+                        </span>
+                        {plainIds.length > 0 && (
+                          <button onClick={() => markSection(plainIds, !allDone)}
+                                  style={{ color: cat.color }} className="text-[11px] font-semibold">
+                            {allDone ? "Clear" : "All"}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    {section.subtitle && (
+                      <p style={{ color: TEXT_MUTED }} className="text-[12px] mt-1">{section.subtitle}</p>
+                    )}
+                    <button onClick={() => { setView("train"); window.scrollTo(0, 0); }}
+                            style={{ color: cat.color, borderColor: cat.color }}
+                            className="mt-2.5 w-full text-xs font-semibold py-2 rounded-lg border flex items-center justify-center gap-1.5">
+                      <Dumbbell size={13} /> Open in Train <ChevronRight size={13} />
+                    </button>
+                  </div>
+                </div>
+              );
+            }
 
             return (
               <div key={section.key} style={{ background: CARD, borderColor: BORDER }}
                    className="rounded-2xl border overflow-hidden">
-                <div role={hasTasks ? "button" : undefined} tabIndex={hasTasks ? 0 : undefined}
-                     onClick={() => hasTasks && setSectionOpen((p) => ({ ...p, [section.key]: !isOpen }))}
-                     onKeyDown={(e) => { if (hasTasks && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); setSectionOpen((p) => ({ ...p, [section.key]: !isOpen })); } }}
+                <div role={toggle ? "button" : undefined} tabIndex={toggle ? 0 : undefined}
+                     onClick={() => toggle && setSectionOpen((p) => ({ ...p, [section.key]: !isOpen }))}
+                     onKeyDown={(e) => { if (toggle && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); setSectionOpen((p) => ({ ...p, [section.key]: !isOpen })); } }}
                      style={{ borderLeftColor: cat.color }}
-                     className={`border-l-4 px-4 py-3 ${hasTasks ? "cursor-pointer select-none" : ""}`}>
+                     className={`border-l-4 px-4 py-3 ${toggle ? "cursor-pointer select-none" : ""}`}>
                   <div className="flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2 min-w-0">
                       <Icon size={15} style={{ color: cat.color }} className="shrink-0" />
@@ -1046,7 +1162,7 @@ function AppInner({ setThemeId }) {
                           {allDone ? "Clear" : "All"}
                         </button>
                       )}
-                      {hasTasks && (
+                      {toggle && (
                         <ChevronDown size={16} style={{ color: TEXT_MUTED, transform: isOpen ? "rotate(180deg)" : "none", transition: "transform 200ms" }} />
                       )}
                     </div>
@@ -1199,7 +1315,7 @@ function AppInner({ setThemeId }) {
                       const sub = rec?.subs?.[task.id];
                       const isSub = Boolean(sub?.name);
                       const collapsible = section.cat === "strength" || section.cat === "mobility";
-                      const open = Boolean(expanded[task.id]);
+                      const open = inTrain || Boolean(expanded[task.id]);
 
                       return (
                         <div key={task.id} style={border}>
@@ -1218,7 +1334,7 @@ function AppInner({ setThemeId }) {
                               </p>
                               {!collapsible && <p style={{ fontFamily: FONT_MONO, color: TEXT_MUTED }} className="text-[11px] mt-0.5">{task.presc}</p>}
                             </div>
-                            {collapsible ? (
+                            {inTrain ? null : collapsible ? (
                               <button onClick={(e) => { e.stopPropagation(); setExpanded((p) => ({ ...p, [task.id]: !open })); }}
                                       aria-label={open ? "Hide detail" : "Show detail"} aria-expanded={open}
                                       style={{ color: TEXT_MUTED }} className="shrink-0 p-1">
