@@ -23,6 +23,7 @@ import { THEMES, THEME_IDS, buildTheme } from "./src/core/themes.js";
 
 const appSrc = fs.readFileSync("./src/app.jsx", "utf8");
 const configSrc = fs.readFileSync("./src/config.jsx", "utf8");
+const indexSrc = fs.readFileSync("./index.html", "utf8");
 
 let failures = 0;
 function check(label, actual, expected) {
@@ -43,7 +44,7 @@ const BASELINE = {
   "amber-slate": {
     BG: "#10131A", CARD: "#1A1F29", BORDER: "#2A3140",
     TEXT_PRIMARY: "#EEF0F3", TEXT_SECONDARY: "#8891A3", TEXT_MUTED: "#5C6577",
-    ACCENT: "#E3A23C", ACCENT_2: "#4CB6C4", HEAT_RGB: "111,207,151",
+    ACCENT: "#E3A23C", ACCENT_2: "#4CB6C4", HEAT_RGB: "111,207,151", STATUS_BAR: "#10131A",
     FONT_DISPLAY: "'Space Grotesk', system-ui, sans-serif",
     FONT_BODY: "'IBM Plex Sans', system-ui, sans-serif",
     FONT_MONO: "'IBM Plex Mono', ui-monospace, monospace",
@@ -51,7 +52,7 @@ const BASELINE = {
   "rose-linen": {
     BG: "#FBF7F4", CARD: "#FFFFFF", BORDER: "#EADFD8",
     TEXT_PRIMARY: "#2E2724", TEXT_SECONDARY: "#7A6A62", TEXT_MUTED: "#A2938B",
-    ACCENT: "#C97388", ACCENT_2: "#7FB88F", HEAT_RGB: "201,115,136",
+    ACCENT: "#C97388", ACCENT_2: "#7FB88F", HEAT_RGB: "201,115,136", STATUS_BAR: "#C97388",
     FONT_DISPLAY: "'Fraunces', Georgia, serif",
     FONT_BODY: "'Karla', system-ui, sans-serif",
     FONT_MONO: "'IBM Plex Mono', ui-monospace, monospace",
@@ -110,7 +111,7 @@ const dig = (obj, path) => path.split(".").reduce((o, k) => (o == null ? o : o[k
 console.log("--- every theme carries every token ---");
 const REQUIRED = [
   "id", "label", "mode", "BG", "CARD", "BORDER", "TEXT_PRIMARY", "TEXT_SECONDARY",
-  "TEXT_MUTED", "ACCENT", "ACCENT_2", "ON_ACCENT", "KNOB", "OK", "HEAT_RGB", "TINT", "BADGE",
+  "TEXT_MUTED", "ACCENT", "ACCENT_2", "ON_ACCENT", "KNOB", "STATUS_BAR", "OK", "HEAT_RGB", "TINT", "BADGE",
   "FONT_DISPLAY", "FONT_BODY", "FONT_MONO", "FONT_IMPORT",
 ];
 THEME_IDS.forEach((id) => {
@@ -147,7 +148,7 @@ const leftovers = appSrc.match(/"#[0-9A-Fa-f]{3,8}"|rgba\([0-9., ]*\)/g) || [];
 check("no colour literal survives in app.jsx", [...new Set(leftovers)].sort(), []);
 ok("module-scope THEME destructuring is gone", !/^const \{\n[^}]*\} = THEME;/m.test(appSrc));
 ok("useTheme() is defined", /function useTheme\(\)/.test(appSrc));
-ok("a provider wraps the tree", /<ThemeContext.Provider value=\{THEME\}>/.test(appSrc));
+ok("a provider wraps the tree with the LIVE theme", /<ThemeContext.Provider value=\{theme\}>/.test(appSrc));
 ok("entry point still exports HennaApp by default", /export default function HennaApp\(\)/.test(appSrc));
 
 // A token dropped into a JSX ATTRIBUTE needs braces: color={ON_ACCENT}, never
@@ -201,48 +202,74 @@ const rgbaParts = (s) => {
   return [[r, g, b], a];
 };
 
+/* ------------------------------ 4. the switcher ---------------------------- */
+
+console.log("\n--- the switcher ---");
+// First paint. Settings load asynchronously, so the provider must read the
+// stored choice synchronously, from the key the store actually writes, or every
+// app open flashes the default theme before jumping to the chosen one.
+ok("the stored theme is read synchronously before first paint",
+   /useState\(readStoredThemeId\)/.test(appSrc) &&
+   /localStorage\.getItem\(STORAGE_PREFIX \+ "settings"\)/.test(appSrc));
+ok("the settings state starts with that same stored id (no mount-time flash)",
+   /useState\(\{ gentler: false, hrMax: null, theme: readStoredThemeId\(\) \}\)/.test(appSrc));
+ok("an unknown or corrupt stored value falls back to the default",
+   /THEMES\[id\] \? id : DEFAULT_THEME_ID/.test(appSrc) && /catch \(e\) \{\s*return DEFAULT_THEME_ID;/.test(appSrc));
+ok("the choice is saved through updateSettings, so it syncs like every other setting",
+   /updateSettings\(\{ theme: id \}\)/.test(appSrc));
+// The Program tab was the one place handed the static import. It would have
+// stayed in the default theme while the rest of the app switched.
+check("nothing is handed the static THEME import", (appSrc.match(/=\{THEME\}/g) || []).length, 0);
+ok("ProgramView receives the live theme", /<ProgramView[^>]*theme=\{activeTheme\}/.test(appSrc));
+ok("config.jsx builds any theme with this client's categories", /export function makeTheme\(id\)/.test(configSrc));
+ok("the status bar follows the theme", /setAttribute\("content", theme\.STATUS_BAR\)/.test(appSrc));
+const metaColour = (indexSrc.match(/<meta name="theme-color" content="([^"]+)"/) || [])[1];
+check("index.html's first-paint status bar matches the default theme", metaColour, THEMES[themeId].STATUS_BAR);
+
 console.log("\n--- contrast — asserted unless ACCEPTED (text 4.5:1; toggle knob 3:1, non-text UI) ---");
-const t = THEMES[themeId];
-const C = hex(t.CARD);
+// With a switcher, this client's categories can appear under EVERY theme, so
+// every combination is checked, not just the default. A category written as
+// ACCENT / ACCENT_2 takes the active theme's value; a fixed hex keeps its own.
+const catsBody = (configSrc.match(/function catsFor\(\{ ACCENT, ACCENT_2 \}\) \{\n  return \{([\s\S]*?)\n  \};/) || [])[1] || "";
+ok("category colours were found in config.jsx", /color:/.test(catsBody));
 const tintOn = (rgba, surface) => {
   const [rgb, a] = rgbaParts(rgba);
   return over(rgb, a, surface);
 };
 
-// ON_ACCENT does not only sit on the accent: ticks, chips and buttons sit on
-// every category colour too. Read this client's category colours from
-// config.jsx as text (it imports React and icons, so it cannot be imported).
-const catsBlock = (configSrc.match(/const CATS = \{([\s\S]*?)\n\};/) || [])[1] || "";
-const fills = [...catsBlock.matchAll(/color: (?:"(#[0-9A-Fa-f]{6})"|(ACCENT_2|ACCENT))/g)]
-  .map((m) => m[1] || t[m[2]]);
-ok("category colours were found in config.jsx", fills.length > 0);
-const worstFill = fills.reduce(
-  (w, f) => { const r = ratio(hex(t.ON_ACCENT), hex(f)); return r < w.r ? { r, f } : w; },
-  { r: Infinity, f: null }
-);
-
-const pairs = [
-  ["TEXT_PRIMARY on CARD", ratio(hex(t.TEXT_PRIMARY), C), 4.5],
-  ["TEXT_SECONDARY on CARD", ratio(hex(t.TEXT_SECONDARY), C), 4.5],
-  ["TEXT_MUTED on CARD", ratio(hex(t.TEXT_MUTED), C), 4.5],
-  ["TEXT_MUTED on BG", ratio(hex(t.TEXT_MUTED), hex(t.BG)), 4.5],
-  ["ON_ACCENT on ACCENT", ratio(hex(t.ON_ACCENT), hex(t.ACCENT)), 4.5],
-  ["ON_ACCENT on every category fill", worstFill.r, 4.5, `worst: ${worstFill.f}`],
-  ["KNOB on its OFF track (BORDER)", ratio(hex(t.KNOB), hex(t.BORDER)), 3],
-  ["KNOB on its ON track (ACCENT)", ratio(hex(t.KNOB), hex(t.ACCENT)), 1.5, "shape, not text — only needs to be seen"],
-  ["ACCENT on CARD", ratio(hex(t.ACCENT), C), 4.5],
-  ["ACCENT_2 on CARD", ratio(hex(t.ACCENT_2), C), 4.5],
-  ["BADGE.ramp.text on its tint", ratio(hex(t.BADGE.ramp.text), tintOn(t.BADGE.ramp.tint, C)), 4.5],
-  ["BADGE.moved.text on its tint", ratio(hex(t.BADGE.moved.text), tintOn(t.BADGE.moved.tint, C)), 4.5],
-  ["ACCENT on BADGE.gentler.tint", ratio(hex(t.ACCENT), tintOn(t.BADGE.gentler.tint, C)), 4.5],
-];
-const accepted = ACCEPTED[themeId] || {};
-pairs.forEach(([name, r, min, note]) => {
-  const pass = r >= min;
-  const why = accepted[name];
-  const tag = pass ? "PASS" : why ? "KEPT" : "FAIL";
-  if (tag === "FAIL") failures++;
-  console.log(`${tag}  ${String(r).padStart(6)}:1  (min ${min})  ${name}${note ? `  [${note}]` : ""}${!pass && why ? `\n        accepted: ${why}` : ""}`);
+THEME_IDS.forEach((id) => {
+  const t = THEMES[id];
+  const C = hex(t.CARD);
+  const fills = [...catsBody.matchAll(/color: (?:"(#[0-9A-Fa-f]{6})"|(ACCENT_2|ACCENT))/g)]
+    .map((m) => m[1] || t[m[2]]);
+  const worstFill = fills.reduce(
+    (w, f) => { const r = ratio(hex(t.ON_ACCENT), hex(f)); return r < w.r ? { r, f } : w; },
+    { r: Infinity, f: null }
+  );
+  const pairs = [
+    ["TEXT_PRIMARY on CARD", ratio(hex(t.TEXT_PRIMARY), C), 4.5],
+    ["TEXT_SECONDARY on CARD", ratio(hex(t.TEXT_SECONDARY), C), 4.5],
+    ["TEXT_MUTED on CARD", ratio(hex(t.TEXT_MUTED), C), 4.5],
+    ["TEXT_MUTED on BG", ratio(hex(t.TEXT_MUTED), hex(t.BG)), 4.5],
+    ["ON_ACCENT on ACCENT", ratio(hex(t.ON_ACCENT), hex(t.ACCENT)), 4.5],
+    ["ON_ACCENT on every category fill", worstFill.r, 4.5, `worst: ${worstFill.f}`],
+    ["KNOB on its OFF track (BORDER)", ratio(hex(t.KNOB), hex(t.BORDER)), 3],
+    ["KNOB on its ON track (ACCENT)", ratio(hex(t.KNOB), hex(t.ACCENT)), 1.5, "shape, not text — only needs to be seen"],
+    ["ACCENT on CARD", ratio(hex(t.ACCENT), C), 4.5],
+    ["ACCENT_2 on CARD", ratio(hex(t.ACCENT_2), C), 4.5],
+    ["BADGE.ramp.text on its tint", ratio(hex(t.BADGE.ramp.text), tintOn(t.BADGE.ramp.tint, C)), 4.5],
+    ["BADGE.moved.text on its tint", ratio(hex(t.BADGE.moved.text), tintOn(t.BADGE.moved.tint, C)), 4.5],
+    ["ACCENT on BADGE.gentler.tint", ratio(hex(t.ACCENT), tintOn(t.BADGE.gentler.tint, C)), 4.5],
+  ];
+  const accepted = ACCEPTED[id] || {};
+  console.log(`  ${id}${id === themeId ? "  (this client's default)" : ""}`);
+  pairs.forEach(([name, r, min, note]) => {
+    const pass = r >= min;
+    const why = accepted[name];
+    const tag = pass ? "PASS" : why ? "KEPT" : "FAIL";
+    if (tag === "FAIL") failures++;
+    console.log(`${tag}  ${String(r).padStart(6)}:1  (min ${min})  ${name}${note ? `  [${note}]` : ""}${!pass && why ? `\n        accepted: ${why}` : ""}`);
+  });
 });
 
 console.log(failures === 0 ? "\nALL CHECKS PASSED" : `\n${failures} CHECK(S) FAILED`);

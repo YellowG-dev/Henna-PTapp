@@ -8,7 +8,7 @@ import {
 } from "recharts";
 
 import {
-  PROGRAM, THEME, ProgramView, CLIENT_LABEL, CLIENT_NAME, STORAGE_PREFIX,
+  PROGRAM, THEME, makeTheme, DEFAULT_THEME_ID, ProgramView, CLIENT_LABEL, CLIENT_NAME, STORAGE_PREFIX,
   START_DATE, RAMP_WEEKS, APP_VERSION, MOBILITY, BLOCKS, SLOT_OPTIONS, SLOT_META,
 } from "./config.jsx";
 
@@ -18,6 +18,7 @@ import {
   suggestDeloadWeek, resolveTesting, SKIP_REASONS, dateKey, daysBetween, getISOWeek,
   loadKeyFor, labelForLoadKey,
 } from "./core/engine.js";
+import { THEMES, THEME_IDS } from "./core/themes.js";
 import { variantsFor } from "./core/patterns.js";
 import { computeStreak, buildHeatmapCells } from "./core/stats.js";
 import { createStore, localStorageAdapter } from "./core/storage.js";
@@ -76,7 +77,7 @@ function setCountFor(task, ramp) {
 
 /* ---------------------------------- App ---------------------------------- */
 
-function AppInner() {
+function AppInner({ setThemeId }) {
   const { BG, CARD, BORDER, TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED, ACCENT, ACCENT_2,
           HEAT_RGB, FONT_DISPLAY, FONT_BODY, FONT_MONO, FONT_IMPORT, CATS, OK_COLOR,
           ON_ACCENT, KNOB, TINT, BADGE } = useTheme();
@@ -86,7 +87,14 @@ function AppInner() {
   const [loading, setLoading] = useState(true);
   const [log, setLog] = useState({});
   const [overrides, setOverrides] = useState({});
-  const [settings, setSettings] = useState({ gentler: false, hrMax: null });
+  const [settings, setSettings] = useState({ gentler: false, hrMax: null, theme: readStoredThemeId() });
+  const activeTheme = useTheme(); // the whole object, for ProgramView
+
+  // settings.theme is the single source of truth. It is saved locally and
+  // synced to user_settings with the rest of settings; the provider mirrors it.
+  useEffect(() => {
+    setThemeId(THEMES[settings.theme] ? settings.theme : DEFAULT_THEME_ID);
+  }, [settings.theme, setThemeId]);
   const [view, setView] = useState("today");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [dayOffset, setDayOffset] = useState(0);
@@ -748,6 +756,30 @@ function AppInner() {
 
         {settingsOpen && (
           <div style={{ background: CARD, borderColor: BORDER }} className="mt-3 rounded-2xl border p-4 space-y-4">
+            <div>
+              <p className="text-xs font-semibold mb-1">Theme</p>
+              <p style={{ color: TEXT_MUTED }} className="text-[11px] mb-2">
+                Follows you to every device you sign in on.
+              </p>
+              <div className="flex gap-2">
+                {THEME_IDS.map((id) => {
+                  const opt = THEMES[id];
+                  const chosen = activeTheme.id === id;
+                  return (
+                    <button key={id} onClick={() => updateSettings({ theme: id })}
+                            aria-pressed={chosen}
+                            style={{ background: opt.BG, borderColor: chosen ? ACCENT : BORDER,
+                                     borderWidth: chosen ? 2 : 1 }}
+                            className="flex-1 rounded-xl border px-3 py-2.5 flex items-center gap-2 text-left">
+                      <span style={{ background: opt.ACCENT }} className="shrink-0 w-3.5 h-3.5 rounded-full" />
+                      <span style={{ color: opt.TEXT_PRIMARY, fontFamily: opt.FONT_BODY }}
+                            className="text-xs font-semibold">{opt.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
             {PROGRAM.usesHeartRate && (
               <div style={{ borderColor: BORDER }} className="border-t pt-4">
                 <p className="text-xs font-semibold mb-1">Max heart rate</p>
@@ -1513,7 +1545,7 @@ function AppInner() {
       )}
 
       {/* ------------------------------- Program ------------------------------ */}
-      {view === "program" && <ProgramView Section={Section} ExerciseList={ExerciseList} theme={THEME} />}
+      {view === "program" && <ProgramView Section={Section} ExerciseList={ExerciseList} theme={activeTheme} />}
     </div>
   );
 }
@@ -1926,10 +1958,36 @@ function ExerciseList({ exercises, color }) {
  * changes visually. Phase 3 replaces the constant with state plus a stored
  * setting, and the switcher works without touching any call site.
  */
+/**
+ * The stored theme, read SYNCHRONOUSLY so the very first paint is already in
+ * the right theme. Settings load asynchronously; reading them the normal way
+ * would paint the default theme first and then jump, on every app open.
+ * Same key and format the store uses: STORAGE_PREFIX + "settings", JSON.
+ */
+function readStoredThemeId() {
+  try {
+    const raw = window.localStorage.getItem(STORAGE_PREFIX + "settings");
+    const id = raw ? JSON.parse(raw).theme : null;
+    return THEMES[id] ? id : DEFAULT_THEME_ID;
+  } catch (e) {
+    return DEFAULT_THEME_ID;
+  }
+}
+
 export default function HennaApp() {
+  const [themeId, setThemeId] = useState(readStoredThemeId);
+  const theme = useMemo(() => makeTheme(themeId), [themeId]);
+
+  // The installed app's status bar. index.html holds the default theme's value
+  // for first paint; this keeps it in step when the theme changes.
+  useEffect(() => {
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute("content", theme.STATUS_BAR);
+  }, [theme]);
+
   return (
-    <ThemeContext.Provider value={THEME}>
-      <AppInner />
+    <ThemeContext.Provider value={theme}>
+      <AppInner setThemeId={setThemeId} />
     </ThemeContext.Provider>
   );
 }

@@ -43,6 +43,9 @@
        old dark greens and purples were chosen for a light card and measured
        2.19-2.49:1 on the dark one.
 
+   Phase 3 added STATUS_BAR (moved out of index.html so the installed app's
+   status bar follows the theme) and the runtime switcher.
+
    rose-linen was deliberately NOT changed. Its sub-4.5 pairs were reviewed one
    by one and judged acceptable for its one known user (owner decision, 20 Sep
    2026). They are listed as ACCEPTED in verify-theme.mjs, so a regression still
@@ -73,6 +76,10 @@ export const THEMES = {
     ON_ACCENT: "#10131A",
     // The toggle knob. Not "on accent": when the toggle is off it sits on BORDER.
     KNOB: "#FFFFFF",
+    // The phone's status bar in the installed app (<meta name="theme-color">).
+    // index.html carries the default theme's value for first paint; the app
+    // updates it when the theme changes.
+    STATUS_BAR: "#10131A",
     // Fallback "target met" green when a palette defines no mobility colour.
     OK: "#7FB88F",
     HEAT_RGB: "111,207,151",
@@ -112,6 +119,8 @@ export const THEMES = {
     ACCENT_2: "#7FB88F",
     ON_ACCENT: "#fff",
     KNOB: "#fff",
+    // Henna's status bar was always her accent, not her background. Kept.
+    STATUS_BAR: "#C97388",
     OK: "#7FB88F",
     HEAT_RGB: "201,115,136",
     // These rose and lilac values were written for THIS palette, which is why

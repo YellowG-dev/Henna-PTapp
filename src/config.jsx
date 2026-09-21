@@ -28,8 +28,6 @@ export const BACKUP_URL = "";
 export const SUPABASE_URL = "https://qpkdqyazdzhoohowkouy.supabase.co";
 export const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_VCvYuYUAC9Dnf3kiLNB93g_tP_5c473";
 
-const { ACCENT, ACCENT_2 } = THEMES["rose-linen"];
-
 // Which theme this client opens with. Every palette now lives in
 // core/themes.js, shared byte-identically by all three repos; this file keeps
 // only what is genuinely per-client.
@@ -39,16 +37,27 @@ export const DEFAULT_THEME_ID = "rose-linen";
 // same ones, or even the same number of them, so a theme cannot own this list
 // without carrying categories the other apps never show.
 // The theme supplies colours; this file decides which categories exist.
-const CATS = {
-  strength: { label: "Strength", color: ACCENT, Icon: Dumbbell },
-  mobility: { label: "Mobility", color: ACCENT_2, Icon: Wind },
-  yoga: { label: "Yoga", color: "#A99BC9", Icon: Flower2 },
-  check: { label: "Check", color: "#96877E", Icon: Heart },
-  rest: { label: "Rest", color: "#B8A99F", Icon: Heart },
-  activity: { label: "Activity", color: "#E0A458", Icon: Flame },
-};
+// A category written as ACCENT or ACCENT_2 follows the ACTIVE theme's accents,
+// so switching theme recolours it along with everything else. A category with a
+// fixed hex keeps that colour in every theme.
+function catsFor({ ACCENT, ACCENT_2 }) {
+  return {
+    strength: { label: "Strength", color: ACCENT, Icon: Dumbbell },
+    mobility: { label: "Mobility", color: ACCENT_2, Icon: Wind },
+    yoga: { label: "Yoga", color: "#A99BC9", Icon: Flower2 },
+    check: { label: "Check", color: "#96877E", Icon: Heart },
+    rest: { label: "Rest", color: "#B8A99F", Icon: Heart },
+    activity: { label: "Activity", color: "#E0A458", Icon: Flame },
+  };
+}
 
-export const THEME = buildTheme(DEFAULT_THEME_ID, CATS);
+/** Everything app.jsx needs for one theme, carrying this client's categories. */
+export function makeTheme(id) {
+  const known = THEMES[id] ? id : DEFAULT_THEME_ID;
+  return buildTheme(known, catsFor(THEMES[known]));
+}
+
+export const THEME = makeTheme(DEFAULT_THEME_ID);
 
 /* ------------------------------ Program tab ------------------------------- */
 
