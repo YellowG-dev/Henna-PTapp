@@ -3,7 +3,7 @@
 // Needs no node_modules. Reads src/app.jsx as TEXT, same as verify-theme.mjs,
 // so it runs in any of the three client repos unchanged.
 //
-// What it guards (Step 5, Phase 1):
+// What it guards (Step 5, Phases 1-2):
 //   1. Rules of Hooks in AppInner. Every hook call must sit ABOVE the
 //      `if (loading)` early return. A hook below it registers on the second
 //      render but not the first, and React unmounts the whole tree — the exact
@@ -67,6 +67,16 @@ ok("empty state points at the next strength session", src.includes("Go to that d
 ok("Train uses the same day navigation as Today", src.includes('{view === "today" || view === "train" ? ('));
 
 /* --------------------------- 3. ring untouched ---------------------------- */
+
+console.log("\n--- auto-tick (Phase 2) ---");
+ok("both set inputs pass today's set count to commitLoad",
+   src.includes('commitLoad(lk, si, "w", e.target.value, count)') && src.includes('commitLoad(lk, si, "r", e.target.value, count)'));
+ok("auto-tick fires on the incomplete -> complete transition only (manual un-tick respected)",
+   src.includes("if (!complete(before) && complete(arr)) next.done = { ...r.done, [exId]: true };"));
+ok("a set counts as logged by its reps (bodyweight sets carry no weight)",
+   src.includes("every((_, i) => a[i]?.r != null)"));
+ok("swapped exercises are skipped", src.includes('!exId.includes("::")'));
+ok("auto-tick only ever writes true, never un-ticks", !/next\.done = \{[^}]*\]: false/.test(src));
 
 console.log("\n--- completion ring ---");
 ok("ring still counts every section (render-only change)",

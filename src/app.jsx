@@ -321,16 +321,27 @@ function AppInner({ setThemeId }) {
     });
   }, [persist, notesDraft]);
 
-  const commitLoad = useCallback((exId, idx, field, raw) => {
+  // setCount: sets prescribed today (after ramp). When given, the exercise is
+  // auto-ticked at the moment its last set gets reps - the transition only, so
+  // a manual un-tick is not undone by a later edit. Reps, not weight, decide
+  // "logged": bodyweight sets are logged with reps and no weight. Swapped
+  // exercises (key "id::slug") are skipped - the swap already counts as done.
+  const commitLoad = useCallback((exId, idx, field, raw, setCount) => {
     persist((r) => {
       const loads = { ...(r.loads || {}) };
-      const arr = [...(loads[exId] || [])];
+      const before = loads[exId] || [];
+      const arr = [...before];
       const prev = arr[idx] || {};
       const num = parseFloat(String(raw).trim().replace(",", "."));
       const val = raw !== "" && !isNaN(num) ? num : null;
       arr[idx] = { w: field === "w" ? val : prev.w ?? null, r: field === "r" ? val : prev.r ?? null };
       loads[exId] = arr;
-      return { ...r, loads };
+      const next = { ...r, loads };
+      if (setCount > 0 && !exId.includes("::")) {
+        const complete = (a) => Array.from({ length: setCount }).every((_, i) => a[i]?.r != null);
+        if (!complete(before) && complete(arr)) next.done = { ...r.done, [exId]: true };
+      }
+      return next;
     });
   }, [persist]);
 
@@ -1397,14 +1408,14 @@ function AppInner({ setThemeId }) {
                                                      placeholder={le?.w != null ? String(le.w) : "kg"}
                                                      value={loadDrafts[wKey] ?? ""} onClick={(e) => e.stopPropagation()}
                                                      onChange={(e) => setLoadDrafts((p) => ({ ...p, [wKey]: e.target.value }))}
-                                                     onBlur={(e) => commitLoad(lk, si, "w", e.target.value)}
+                                                     onBlur={(e) => commitLoad(lk, si, "w", e.target.value, count)}
                                                      style={{ fontFamily: FONT_MONO, borderColor: BORDER, background: BG }}
                                                      className="w-11 text-center text-xs px-1 py-1 rounded-md border" />
                                               <input type="text" inputMode="numeric" aria-label={`${task.name} set ${si + 1} reps`}
                                                      placeholder={le?.r != null ? String(le.r) : "reps"}
                                                      value={loadDrafts[rKey] ?? ""} onClick={(e) => e.stopPropagation()}
                                                      onChange={(e) => setLoadDrafts((p) => ({ ...p, [rKey]: e.target.value }))}
-                                                     onBlur={(e) => commitLoad(lk, si, "r", e.target.value)}
+                                                     onBlur={(e) => commitLoad(lk, si, "r", e.target.value, count)}
                                                      style={{ fontFamily: FONT_MONO, borderColor: BORDER, background: BG }}
                                                      className="w-10 text-center text-xs px-1 py-1 rounded-md border" />
                                             </div>
