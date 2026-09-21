@@ -24,46 +24,30 @@
 // `config.jsx` is NOT — it stays per-client and picks a default from here.
 
 /* -------------------------------------------------------------------------
-   PHASE 0 NOTE — READ BEFORE "FIXING" ANYTHING BELOW
+   HISTORY — read before changing values
 
-   Phase 0 is a pure refactor: every value here is the value the app renders
-   TODAY, so all three apps must look pixel-identical before and after.
+   Phase 0 (20 Sep 2026) moved every colour here unchanged. Phase 1 then fixed
+   the DARK theme only:
 
-   That means two known-wrong values are preserved on purpose:
+     - ON_ACCENT went from white to dark. White failed on all eight fills it
+       lands on in the dark apps (best 3.34:1); dark passes on all eight (worst
+       5.57:1). It is not only the accent: ticks, chips and buttons also sit on
+       every category colour, so the test was run against each of them.
+     - KNOB split out of ON_ACCENT. The toggle knob sits on a grey track when
+       the toggle is OFF — it is not on a fill. A dark knob there measured
+       1.43:1, i.e. invisible. It stays white.
+     - The Gentler-week badge and the soft tints were ROSE — Henna's accent,
+       hardcoded in the shared app.jsx — so the dark apps showed amber text on
+       a pink tint. They are now derived from amber.
+     - Badge text on a dark card is the badge's own hue at full strength. The
+       old dark greens and purples were chosen for a light card and measured
+       2.19-2.49:1 on the dark one.
 
-     - BADGE.gentler is a ROSE tint. Rose is Henna's accent. It was hardcoded
-       in the byte-identical app.jsx and paired with `color: ACCENT`, so Juha's
-       and Joonatan's apps render amber text on a pink tint. Wrong today,
-       wrong here, deliberately unchanged until Phase 1.
-     - BADGE.moved is a LILAC tint — Henna's "yoga" category colour, same story.
-
-   Also preserved: TINT.* are rose for the same reason, and ON_ACCENT is #fff
-   everywhere even though it fails contrast on every accent in every theme.
-
-   Phase 1 changes VALUES ONLY, touching no structure. Keeping the two phases
-   separate is what makes "renders identically" a clean pass/fail in Phase 0
-   and "contrast improved" a clean pass/fail in Phase 1.
+   rose-linen was deliberately NOT changed. Its sub-4.5 pairs were reviewed one
+   by one and judged acceptable for its one known user (owner decision, 20 Sep
+   2026). They are listed as ACCEPTED in verify-theme.mjs, so a regression still
+   fails the suite while these known choices do not.
    ------------------------------------------------------------------------- */
-
-/** Shared by every theme in Phase 0 — see the note above. */
-const PHASE0_BADGES = {
-  // Skip day. Text colour is NOT here: it follows CATS.check.color, because
-  // the badge deliberately matches the check category in each client's palette.
-  neutral: { tint: "rgba(136,145,163,0.16)", border: "rgba(136,145,163,0.45)" },
-  // "Week N · easing in".
-  ramp: { tint: "rgba(127,184,143,0.16)", border: "rgba(127,184,143,0.45)", text: "#4C7A5A" },
-  // "Gentler week". Text follows ACCENT, so it is not a token here.
-  gentler: { tint: "rgba(201,115,136,0.14)", border: "rgba(201,115,136,0.4)" },
-  // "Rearranged".
-  moved: { tint: "rgba(169,155,201,0.16)", border: "rgba(169,155,201,0.45)", text: "#6D5F91" },
-};
-
-/** Soft filled surfaces: the note pill, the calendar move banner, the selected day. */
-const PHASE0_TINTS = {
-  soft: "rgba(201,115,136,0.1)",
-  softBorder: "rgba(201,115,136,0.3)",
-  selected: "rgba(201,115,136,0.12)",
-};
 
 const SPACE_GROTESK =
   "https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap";
@@ -85,12 +69,27 @@ export const THEMES = {
     ACCENT: "#E3A23C",
     ACCENT_2: "#4CB6C4",
     // Foreground on any filled swatch — accent buttons, category dots, ticks.
-    ON_ACCENT: "#fff",
+    // Foreground on any filled swatch — the accent AND every category colour.
+    ON_ACCENT: "#10131A",
+    // The toggle knob. Not "on accent": when the toggle is off it sits on BORDER.
+    KNOB: "#FFFFFF",
     // Fallback "target met" green when a palette defines no mobility colour.
     OK: "#7FB88F",
     HEAT_RGB: "111,207,151",
-    TINT: PHASE0_TINTS,
-    BADGE: PHASE0_BADGES,
+    TINT: {
+      soft: "rgba(227,162,60,0.1)",
+      softBorder: "rgba(227,162,60,0.3)",
+      selected: "rgba(227,162,60,0.12)",
+    },
+    BADGE: {
+      // Text follows CATS.check.color (client data), so only the tint can move:
+      // 0.16 -> 0.10 lifts it from 4.11:1 to 4.53:1.
+      neutral: { tint: "rgba(136,145,163,0.1)", border: "rgba(136,145,163,0.45)" },
+      ramp: { tint: "rgba(127,184,143,0.16)", border: "rgba(127,184,143,0.45)", text: "#7FB88F" },
+      // Text follows ACCENT.
+      gentler: { tint: "rgba(227,162,60,0.14)", border: "rgba(227,162,60,0.4)" },
+      moved: { tint: "rgba(169,155,201,0.16)", border: "rgba(169,155,201,0.45)", text: "#A99BC9" },
+    },
     FONT_DISPLAY: "'Space Grotesk', system-ui, sans-serif",
     FONT_BODY: "'IBM Plex Sans', system-ui, sans-serif",
     FONT_MONO: "'IBM Plex Mono', ui-monospace, monospace",
@@ -112,10 +111,22 @@ export const THEMES = {
     ACCENT: "#C97388",
     ACCENT_2: "#7FB88F",
     ON_ACCENT: "#fff",
+    KNOB: "#fff",
     OK: "#7FB88F",
     HEAT_RGB: "201,115,136",
-    TINT: PHASE0_TINTS,
-    BADGE: PHASE0_BADGES,
+    // These rose and lilac values were written for THIS palette, which is why
+    // they looked wrong in the dark apps and right here. Unchanged since Phase 0.
+    TINT: {
+      soft: "rgba(201,115,136,0.1)",
+      softBorder: "rgba(201,115,136,0.3)",
+      selected: "rgba(201,115,136,0.12)",
+    },
+    BADGE: {
+      neutral: { tint: "rgba(136,145,163,0.16)", border: "rgba(136,145,163,0.45)" },
+      ramp: { tint: "rgba(127,184,143,0.16)", border: "rgba(127,184,143,0.45)", text: "#4C7A5A" },
+      gentler: { tint: "rgba(201,115,136,0.14)", border: "rgba(201,115,136,0.4)" },
+      moved: { tint: "rgba(169,155,201,0.16)", border: "rgba(169,155,201,0.45)", text: "#6D5F91" },
+    },
     FONT_DISPLAY: "'Fraunces', Georgia, serif",
     FONT_BODY: "'Karla', system-ui, sans-serif",
     FONT_MONO: "'IBM Plex Mono', ui-monospace, monospace",

@@ -50,7 +50,7 @@ const store = createStore(localStorageAdapter(), STORAGE_PREFIX);
 function FontImport() {
   const { BG, CARD, BORDER, TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED, ACCENT, ACCENT_2,
           HEAT_RGB, FONT_DISPLAY, FONT_BODY, FONT_MONO, FONT_IMPORT, CATS, OK_COLOR,
-          ON_ACCENT, TINT, BADGE } = useTheme();
+          ON_ACCENT, KNOB, TINT, BADGE } = useTheme();
   return (
     <style>{`
       @import url('${FONT_IMPORT}');
@@ -79,7 +79,7 @@ function setCountFor(task, ramp) {
 function AppInner() {
   const { BG, CARD, BORDER, TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED, ACCENT, ACCENT_2,
           HEAT_RGB, FONT_DISPLAY, FONT_BODY, FONT_MONO, FONT_IMPORT, CATS, OK_COLOR,
-          ON_ACCENT, TINT, BADGE } = useTheme();
+          ON_ACCENT, KNOB, TINT, BADGE } = useTheme();
   const today = useMemo(() => new Date(), []);
   const todayKey = dateKey(today);
 
@@ -833,7 +833,7 @@ function AppInner() {
                                 aria-label="Toggle sharing with your coach"
                                 style={{ background: sharing.enabled ? ACCENT : BORDER, opacity: sharingBusy ? 0.6 : 1 }}
                                 className="shrink-0 w-11 h-6 rounded-full relative transition-colors">
-                          <span style={{ background: ON_ACCENT, left: sharing.enabled ? 22 : 3 }}
+                          <span style={{ background: KNOB, left: sharing.enabled ? 22 : 3 }}
                                 className="absolute top-0.5 w-5 h-5 rounded-full transition-all shadow-sm" />
                         </button>
                       )}
@@ -1523,7 +1523,7 @@ function AppInner() {
 function ChartCard({ title, note, data, color, domain, unit, kind, totalWindow, reference, referenceLabel, hideValue }) {
   const { BG, CARD, BORDER, TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED, ACCENT, ACCENT_2,
           HEAT_RGB, FONT_DISPLAY, FONT_BODY, FONT_MONO, FONT_IMPORT, CATS, OK_COLOR,
-          ON_ACCENT, TINT, BADGE } = useTheme();
+          ON_ACCENT, KNOB, TINT, BADGE } = useTheme();
   const latest = data[data.length - 1];
   const isTotal = kind === "total";
   const lineKey = isTotal ? "total" : "avg";
@@ -1584,7 +1584,7 @@ function getMonthMatrix(year, month) {
 function CalendarView(p) {
   const { BG, CARD, BORDER, TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED, ACCENT, ACCENT_2,
           HEAT_RGB, FONT_DISPLAY, FONT_BODY, FONT_MONO, FONT_IMPORT, CATS, OK_COLOR,
-          ON_ACCENT, TINT, BADGE } = useTheme();
+          ON_ACCENT, KNOB, TINT, BADGE } = useTheme();
   const weeks = useMemo(() => getMonthMatrix(p.calYear, p.calMonth), [p.calYear, p.calMonth]);
   const selInfo = useMemo(() => resolveSchedule(p.calSelected, "auto", p.overrides, PROGRAM), [p.calSelected, p.overrides]);
   const block = selInfo.slots.strength ? BLOCKS.strength[selInfo.slots.strength] : null;
@@ -1880,7 +1880,7 @@ function CalendarView(p) {
 function Section({ title, subtitle, color, defaultOpen, children }) {
   const { BG, CARD, BORDER, TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED, ACCENT, ACCENT_2,
           HEAT_RGB, FONT_DISPLAY, FONT_BODY, FONT_MONO, FONT_IMPORT, CATS, OK_COLOR,
-          ON_ACCENT, TINT, BADGE } = useTheme();
+          ON_ACCENT, KNOB, TINT, BADGE } = useTheme();
   const [open, setOpen] = useState(Boolean(defaultOpen));
   return (
     <div style={{ background: CARD, borderColor: BORDER }} className="rounded-2xl border overflow-hidden">
@@ -1900,7 +1900,7 @@ function Section({ title, subtitle, color, defaultOpen, children }) {
 function ExerciseList({ exercises, color }) {
   const { BG, CARD, BORDER, TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED, ACCENT, ACCENT_2,
           HEAT_RGB, FONT_DISPLAY, FONT_BODY, FONT_MONO, FONT_IMPORT, CATS, OK_COLOR,
-          ON_ACCENT, TINT, BADGE } = useTheme();
+          ON_ACCENT, KNOB, TINT, BADGE } = useTheme();
   return (
     <div className="space-y-1.5">
       {exercises.map((e) => (

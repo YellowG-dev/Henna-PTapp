@@ -9,10 +9,14 @@
 // three people use daily, in repos that had no tests of any kind. This is the
 // harness that says the refactor changed nothing.
 //
-// BASELINE below is what each app rendered BEFORE Phase 0, transcribed from
-// the pre-refactor source. Phase 0 must reproduce it exactly. Phase 1 will
-// deliberately break the contrast assertions at the bottom — that is the point
-// of Phase 1, and those are reported, not asserted.
+// BASELINE is what each app rendered before Phase 0 — the surfaces, text and
+// fonts, none of which any phase has changed. EXPECTED is the current value of
+// every token Phase 0 extracted, per theme: rose-linen still holds the original
+// literals, amber-slate holds its Phase 1 values.
+//
+// Contrast is ASSERTED: every pair must clear its threshold unless it is listed
+// in ACCEPTED with a reason. A known, deliberate choice passes; any new
+// regression fails.
 
 import fs from "fs";
 import { THEMES, THEME_IDS, buildTheme } from "./src/core/themes.js";
@@ -54,23 +58,50 @@ const BASELINE = {
   },
 };
 
-// The literals that used to sit inline in app.jsx, and the token each became.
-const LITERALS = [
-  ["ON_ACCENT", "#fff"],
-  ["BADGE.neutral.tint", "rgba(136,145,163,0.16)"],
-  ["BADGE.neutral.border", "rgba(136,145,163,0.45)"],
-  ["BADGE.ramp.tint", "rgba(127,184,143,0.16)"],
-  ["BADGE.ramp.border", "rgba(127,184,143,0.45)"],
-  ["BADGE.ramp.text", "#4C7A5A"],
-  ["BADGE.gentler.tint", "rgba(201,115,136,0.14)"],
-  ["BADGE.gentler.border", "rgba(201,115,136,0.4)"],
-  ["BADGE.moved.tint", "rgba(169,155,201,0.16)"],
-  ["BADGE.moved.border", "rgba(169,155,201,0.45)"],
-  ["BADGE.moved.text", "#6D5F91"],
-  ["TINT.soft", "rgba(201,115,136,0.1)"],
-  ["TINT.softBorder", "rgba(201,115,136,0.3)"],
-  ["TINT.selected", "rgba(201,115,136,0.12)"],
-];
+// Every token Phase 0 extracted from app.jsx, and its current value per theme.
+const EXPECTED = {
+  "rose-linen": {
+    // Unchanged since Phase 0 — these are the literals that were inline.
+    ON_ACCENT: "#fff", KNOB: "#fff",
+    "BADGE.neutral.tint": "rgba(136,145,163,0.16)", "BADGE.neutral.border": "rgba(136,145,163,0.45)",
+    "BADGE.ramp.tint": "rgba(127,184,143,0.16)", "BADGE.ramp.border": "rgba(127,184,143,0.45)", "BADGE.ramp.text": "#4C7A5A",
+    "BADGE.gentler.tint": "rgba(201,115,136,0.14)", "BADGE.gentler.border": "rgba(201,115,136,0.4)",
+    "BADGE.moved.tint": "rgba(169,155,201,0.16)", "BADGE.moved.border": "rgba(169,155,201,0.45)", "BADGE.moved.text": "#6D5F91",
+    "TINT.soft": "rgba(201,115,136,0.1)", "TINT.softBorder": "rgba(201,115,136,0.3)", "TINT.selected": "rgba(201,115,136,0.12)",
+  },
+  "amber-slate": {
+    // Phase 1 values.
+    ON_ACCENT: "#10131A", KNOB: "#FFFFFF",
+    "BADGE.neutral.tint": "rgba(136,145,163,0.1)", "BADGE.neutral.border": "rgba(136,145,163,0.45)",
+    "BADGE.ramp.tint": "rgba(127,184,143,0.16)", "BADGE.ramp.border": "rgba(127,184,143,0.45)", "BADGE.ramp.text": "#7FB88F",
+    "BADGE.gentler.tint": "rgba(227,162,60,0.14)", "BADGE.gentler.border": "rgba(227,162,60,0.4)",
+    "BADGE.moved.tint": "rgba(169,155,201,0.16)", "BADGE.moved.border": "rgba(169,155,201,0.45)", "BADGE.moved.text": "#A99BC9",
+    "TINT.soft": "rgba(227,162,60,0.1)", "TINT.softBorder": "rgba(227,162,60,0.3)", "TINT.selected": "rgba(227,162,60,0.12)",
+  },
+};
+
+// Pairs below threshold that were reviewed and deliberately kept.
+const MUTED_REASON =
+  "raising it to 4.5:1 merges it with TEXT_SECONDARY — measured, the two greys would sit ~1.1:1 apart";
+const ACCEPTED = {
+  "amber-slate": {
+    "TEXT_MUTED on CARD": MUTED_REASON,
+    "TEXT_MUTED on BG": MUTED_REASON,
+  },
+  "rose-linen": {
+    // Owner decision, 20 Sep 2026: the palette stays as it is for its one known user.
+    "TEXT_MUTED on CARD": MUTED_REASON,
+    "TEXT_MUTED on BG": MUTED_REASON,
+    "ON_ACCENT on ACCENT": "owner decision — palette kept",
+    "ACCENT on CARD": "owner decision — rose text in ~8 small action links",
+    "ACCENT_2 on CARD": "never used as text: gradient stop, chart line, category fallback",
+    "BADGE.ramp.text on its tint": "4.41:1 — visually indistinguishable from passing",
+    "ACCENT on BADGE.gentler.tint": "owner decision — palette kept",
+    "ON_ACCENT on every category fill": "owner decision — palette kept",
+    "KNOB on its OFF track (BORDER)":
+      "white knob on a near-white track; its edge comes from shadow-sm, which fill contrast cannot measure. Pre-existing, unchanged",
+  },
+};
 
 const dig = (obj, path) => path.split(".").reduce((o, k) => (o == null ? o : o[k]), obj);
 
@@ -79,7 +110,7 @@ const dig = (obj, path) => path.split(".").reduce((o, k) => (o == null ? o : o[k
 console.log("--- every theme carries every token ---");
 const REQUIRED = [
   "id", "label", "mode", "BG", "CARD", "BORDER", "TEXT_PRIMARY", "TEXT_SECONDARY",
-  "TEXT_MUTED", "ACCENT", "ACCENT_2", "ON_ACCENT", "OK", "HEAT_RGB", "TINT", "BADGE",
+  "TEXT_MUTED", "ACCENT", "ACCENT_2", "ON_ACCENT", "KNOB", "OK", "HEAT_RGB", "TINT", "BADGE",
   "FONT_DISPLAY", "FONT_BODY", "FONT_MONO", "FONT_IMPORT",
 ];
 THEME_IDS.forEach((id) => {
@@ -93,7 +124,7 @@ ok("theme ids match their map keys", THEME_IDS.every((id) => THEMES[id].id === i
 
 /* ------------------------- 2. this repo renders as before ------------------ */
 
-console.log("\n--- this repo reproduces its pre-Phase-0 values ---");
+console.log("\n--- this repo's theme holds its expected values ---");
 const idMatch = configSrc.match(/export const DEFAULT_THEME_ID = "([^"]+)"/);
 ok("config.jsx declares a DEFAULT_THEME_ID", Boolean(idMatch));
 const themeId = idMatch && idMatch[1];
@@ -101,8 +132,12 @@ ok(`DEFAULT_THEME_ID "${themeId}" exists in themes.js`, Boolean(THEMES[themeId])
 
 const base = BASELINE[themeId];
 Object.keys(base).forEach((k) => check(`${k} unchanged`, THEMES[themeId][k], base[k]));
-LITERALS.forEach(([path, value]) =>
-  check(`${path} carries the old literal`, dig(THEMES[themeId], path), value)
+Object.entries(EXPECTED[themeId]).forEach(([path, value]) =>
+  check(`${path} = ${value}`, dig(THEMES[themeId], path), value)
+);
+// The OTHER theme must be untouched too — rose-linen is checked from every repo.
+Object.entries(EXPECTED["rose-linen"]).forEach(([path, value]) =>
+  check(`rose-linen ${path} untouched`, dig(THEMES["rose-linen"], path), value)
 );
 
 /* ------------------------- 3. the refactor is complete --------------------- */
@@ -166,32 +201,49 @@ const rgbaParts = (s) => {
   return [[r, g, b], a];
 };
 
-console.log("\n--- contrast (WCAG AA, 4.5:1 — the app's text is 10-13px, so none of it is 'large') ---");
+console.log("\n--- contrast — asserted unless ACCEPTED (text 4.5:1; toggle knob 3:1, non-text UI) ---");
 const t = THEMES[themeId];
 const C = hex(t.CARD);
 const tintOn = (rgba, surface) => {
   const [rgb, a] = rgbaParts(rgba);
   return over(rgb, a, surface);
 };
+
+// ON_ACCENT does not only sit on the accent: ticks, chips and buttons sit on
+// every category colour too. Read this client's category colours from
+// config.jsx as text (it imports React and icons, so it cannot be imported).
+const catsBlock = (configSrc.match(/const CATS = \{([\s\S]*?)\n\};/) || [])[1] || "";
+const fills = [...catsBlock.matchAll(/color: (?:"(#[0-9A-Fa-f]{6})"|(ACCENT_2|ACCENT))/g)]
+  .map((m) => m[1] || t[m[2]]);
+ok("category colours were found in config.jsx", fills.length > 0);
+const worstFill = fills.reduce(
+  (w, f) => { const r = ratio(hex(t.ON_ACCENT), hex(f)); return r < w.r ? { r, f } : w; },
+  { r: Infinity, f: null }
+);
+
 const pairs = [
-  ["TEXT_PRIMARY on CARD", hex(t.TEXT_PRIMARY), C],
-  ["TEXT_SECONDARY on CARD", hex(t.TEXT_SECONDARY), C],
-  ["TEXT_MUTED on CARD", hex(t.TEXT_MUTED), C],
-  ["TEXT_MUTED on BG", hex(t.TEXT_MUTED), hex(t.BG)],
-  ["ON_ACCENT on ACCENT", hex(t.ON_ACCENT), hex(t.ACCENT)],
-  ["ACCENT on CARD", hex(t.ACCENT), C],
-  ["ACCENT_2 on CARD", hex(t.ACCENT_2), C],
-  ["BADGE.ramp.text on its tint", hex(t.BADGE.ramp.text), tintOn(t.BADGE.ramp.tint, C)],
-  ["BADGE.moved.text on its tint", hex(t.BADGE.moved.text), tintOn(t.BADGE.moved.tint, C)],
-  ["ACCENT on BADGE.gentler.tint", hex(t.ACCENT), tintOn(t.BADGE.gentler.tint, C)],
+  ["TEXT_PRIMARY on CARD", ratio(hex(t.TEXT_PRIMARY), C), 4.5],
+  ["TEXT_SECONDARY on CARD", ratio(hex(t.TEXT_SECONDARY), C), 4.5],
+  ["TEXT_MUTED on CARD", ratio(hex(t.TEXT_MUTED), C), 4.5],
+  ["TEXT_MUTED on BG", ratio(hex(t.TEXT_MUTED), hex(t.BG)), 4.5],
+  ["ON_ACCENT on ACCENT", ratio(hex(t.ON_ACCENT), hex(t.ACCENT)), 4.5],
+  ["ON_ACCENT on every category fill", worstFill.r, 4.5, `worst: ${worstFill.f}`],
+  ["KNOB on its OFF track (BORDER)", ratio(hex(t.KNOB), hex(t.BORDER)), 3],
+  ["KNOB on its ON track (ACCENT)", ratio(hex(t.KNOB), hex(t.ACCENT)), 1.5, "shape, not text — only needs to be seen"],
+  ["ACCENT on CARD", ratio(hex(t.ACCENT), C), 4.5],
+  ["ACCENT_2 on CARD", ratio(hex(t.ACCENT_2), C), 4.5],
+  ["BADGE.ramp.text on its tint", ratio(hex(t.BADGE.ramp.text), tintOn(t.BADGE.ramp.tint, C)), 4.5],
+  ["BADGE.moved.text on its tint", ratio(hex(t.BADGE.moved.text), tintOn(t.BADGE.moved.tint, C)), 4.5],
+  ["ACCENT on BADGE.gentler.tint", ratio(hex(t.ACCENT), tintOn(t.BADGE.gentler.tint, C)), 4.5],
 ];
-let fails = 0;
-pairs.forEach(([name, fg, bg]) => {
-  const r = ratio(fg, bg);
-  if (r < 4.5) fails++;
-  console.log(`  ${r < 4.5 ? "fail" : "ok  "} ${String(r).padStart(6)}:1  ${name}`);
+const accepted = ACCEPTED[themeId] || {};
+pairs.forEach(([name, r, min, note]) => {
+  const pass = r >= min;
+  const why = accepted[name];
+  const tag = pass ? "PASS" : why ? "KEPT" : "FAIL";
+  if (tag === "FAIL") failures++;
+  console.log(`${tag}  ${String(r).padStart(6)}:1  (min ${min})  ${name}${note ? `  [${note}]` : ""}${!pass && why ? `\n        accepted: ${why}` : ""}`);
 });
-console.log(`  ${fails} of ${pairs.length} pairs below 4.5:1 — Phase 1's target.`);
 
 console.log(failures === 0 ? "\nALL CHECKS PASSED" : `\n${failures} CHECK(S) FAILED`);
 process.exitCode = failures === 0 ? 0 : 1;
