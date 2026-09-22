@@ -48,6 +48,49 @@ function useTheme() {
 
 const store = createStore(localStorageAdapter(), STORAGE_PREFIX);
 
+// ==time-input:start
+// Number entry. Plain numbers behave exactly as before (comma or dot decimal).
+// Entries containing ":" are durations: "m:ss" or "h:mm:ss", stored as
+// MINUTES (e.g. "42:30" -> 42.5, "1:45:12" -> 105.2). Before this, parseFloat
+// read "42:30" as 42 and silently dropped the seconds.
+// A number task whose program unit is exactly "h:mm:ss" (TIME_UNIT) gets the
+// full keyboard (the iOS decimal pad has no ":" key) and shows its stored
+// minutes back in the same format.
+const TIME_UNIT = "h:mm:ss";
+
+function parseNumberInput(raw) {
+  const t = String(raw ?? "").trim();
+  if (t === "") return null;
+  if (t.includes(":")) {
+    const parts = t.split(":");
+    if (parts.length < 2 || parts.length > 3) return null;
+    const last = parts[parts.length - 1].replace(",", ".");
+    if (!parts.slice(0, -1).every((p) => /^\d+$/.test(p)) || !/^\d+(\.\d+)?$/.test(last)) return null;
+    const nums = parts.slice(0, -1).map(Number);
+    const sec = Number(last);
+    if (sec >= 60) return null;
+    let minutes;
+    if (nums.length === 2) {
+      if (nums[1] >= 60) return null;
+      minutes = nums[0] * 60 + nums[1] + sec / 60;
+    } else {
+      minutes = nums[0] + sec / 60;
+    }
+    return Math.round(minutes * 10000) / 10000;
+  }
+  const n = parseFloat(t.replace(",", "."));
+  return isNaN(n) ? null : n;
+}
+
+function formatTime(minutes) {
+  const total = Math.round(minutes * 60);
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const sec = String(total % 60).padStart(2, "0");
+  return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${sec}` : `${m}:${sec}`;
+}
+// ==time-input:end
+
 function FontImport() {
   const { BG, CARD, BORDER, TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED, ACCENT, ACCENT_2,
           HEAT_RGB, FONT_DISPLAY, FONT_BODY, FONT_MONO, FONT_IMPORT, CATS, OK_COLOR,
@@ -305,8 +348,8 @@ function AppInner({ setThemeId }) {
   const commitNumber = useCallback((id, raw) => {
     persist((r) => {
       const numbers = { ...(r.numbers || {}) };
-      const n = parseFloat(String(raw).trim().replace(",", "."));
-      if (raw !== "" && !isNaN(n)) numbers[id] = n;
+      const n = parseNumberInput(raw);
+      if (n !== null) numbers[id] = n;
       else delete numbers[id];
       return { ...r, numbers };
     });
@@ -1297,15 +1340,16 @@ function AppInner({ setThemeId }) {
                               </p>
                             </div>
                             <div className="flex items-center gap-1.5 shrink-0">
-                              <input type="text" inputMode="decimal" aria-label={`${task.name}, ${task.unit}`}
+                              <input type="text" inputMode={task.unit === TIME_UNIT ? "text" : "decimal"}
+                                     aria-label={`${task.name}, ${task.unit}`}
                                      placeholder={task.unit}
-                                     value={loadDrafts[draftKey] ?? (has ? String(value) : "")}
+                                     value={loadDrafts[draftKey] ?? (has ? (task.unit === TIME_UNIT ? formatTime(value) : String(value)) : "")}
                                      onChange={(e) => setLoadDrafts((p2) => ({ ...p2, [draftKey]: e.target.value }))}
                                      onBlur={(e) => commitNumber(task.id, e.target.value)}
                                      onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
                                      style={{ fontFamily: FONT_MONO, borderColor: BORDER, background: BG, color: TEXT_PRIMARY }}
-                                     className="w-16 text-right text-sm px-2 py-1 rounded-md border" />
-                              <span style={{ color: TEXT_MUTED }} className="text-xs">{task.unit}</span>
+                                     className={`${task.unit === TIME_UNIT ? "w-20" : "w-16"} text-right text-sm px-2 py-1 rounded-md border`} />
+                              {task.unit !== TIME_UNIT && <span style={{ color: TEXT_MUTED }} className="text-xs">{task.unit}</span>}
                             </div>
                           </div>
                         );
