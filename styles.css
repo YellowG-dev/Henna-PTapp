@@ -738,6 +738,9 @@
     -webkit-user-select: none;
     user-select: none;
   }
+  .block-2 {
+    block-size: calc(var(--spacing) * 2);
+  }
   .focus\:outline-none:focus {
     --tw-outline-style: none;
     outline-style: none;
