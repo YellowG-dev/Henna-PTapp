@@ -89,11 +89,14 @@ export function ProgramView({ Section, ExerciseList, theme }) {
         </p>
       </Section>
 
-      {["a", "b", "c"].map((k) => (
-        <Section key={k} title={BLOCKS.strength[k].label} color={A}>
-          <ExerciseList exercises={BLOCKS.strength[k].exercises} color={A} />
-        </Section>
-      ))}
+      {["a", "b", "c"].map((k) => {
+        const blk = BLOCKS.strength?.[k];
+        return blk && (
+          <Section key={k} title={blk.label} color={A}>
+            <ExerciseList exercises={blk.exercises || []} color={A} />
+          </Section>
+        );
+      })}
 
       <Section title="How to get stronger" subtitle="Reps first, weight last" color={A}>
         <div className="text-xs space-y-2">
@@ -139,7 +142,7 @@ export function ProgramView({ Section, ExerciseList, theme }) {
       </Section>
 
       <Section title="Daily mobility" subtitle="~12 min · neck, upper back, rotation" color={B}>
-        <ExerciseList exercises={MOBILITY} color={B} />
+        <ExerciseList exercises={MOBILITY || []} color={B} />
         <p style={{ color: TEXT_MUTED }} className="text-xs">
           Built around a desk day: opening the upper back, and rotation from three different positions. The breathing
           at the end counts as your meditation.
@@ -148,7 +151,7 @@ export function ProgramView({ Section, ExerciseList, theme }) {
 
       <Section title="Weekly yoga" subtitle="Sundays by default · move it from Calendar" color={CATS.yoga.color}>
         <p className="text-xs mb-2">Neck, shoulders and upper back — the same areas as the daily flow, with more time.</p>
-        <ExerciseList exercises={BLOCKS.yoga.session.exercises} color={CATS.yoga.color} />
+        <ExerciseList exercises={BLOCKS.yoga?.session?.exercises || []} color={CATS.yoga.color} />
       </Section>
 
       <Section title="Walking" color={B}>
