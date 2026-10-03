@@ -3,6 +3,7 @@
  * data). app.jsx imports from here and is byte-identical across every app.
  */
 import { THEMES, buildTheme } from "./core/themes.js";
+import { standardCats } from "./core/categories.jsx";
 import React from "react";
 import { Dumbbell, Wind, Flower2, Heart, Flame, ExternalLink } from "lucide-react";
 import PROGRAM_DATA, { MOBILITY, BLOCKS, SLOT_OPTIONS, SLOT_META, APP_VERSION } from "./core/program-henna.js";
@@ -41,7 +42,10 @@ export const DEFAULT_THEME_ID = "rose-linen";
 // so switching theme recolours it along with everything else. A category with a
 // fixed hex keeps that colour in every theme.
 function catsFor({ ACCENT, ACCENT_2 }) {
-  return {
+  // Every entry below wins; standardCats() only fills the categories this client
+  // never defined (a slot added later, such as Walk or Swim), so no existing
+  // colour or icon changes.
+  const own = {
     strength: { label: "Strength", color: ACCENT, Icon: Dumbbell },
     mobility: { label: "Mobility", color: ACCENT_2, Icon: Wind },
     yoga: { label: "Yoga", color: "#A99BC9", Icon: Flower2 },
@@ -49,6 +53,7 @@ function catsFor({ ACCENT, ACCENT_2 }) {
     rest: { label: "Rest", color: "#B8A99F", Icon: Heart },
     activity: { label: "Activity", color: "#E0A458", Icon: Flame },
   };
+  return { ...standardCats({ ACCENT, ACCENT_2 }), ...own };
 }
 
 /** Everything app.jsx needs for one theme, carrying this client's categories. */
