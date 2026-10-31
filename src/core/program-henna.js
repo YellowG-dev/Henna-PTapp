@@ -26,7 +26,7 @@
 
 export const PROGRAM_ID = "henna";
 export const CLIENT_NAME = "Henna";
-export const APP_VERSION = "5.9.1-beta1";
+export const APP_VERSION = "5.9.2-beta1";
 
 /* --------------------------------- Slots --------------------------------- */
 // One slot: strength. Walking is a daily check rather than a scheduled block,
