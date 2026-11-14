@@ -7,8 +7,7 @@
  * Built from her intake (24 Aug 2026) plus coaching input from John:
  *   - 45, desk job, returning to systematic training after a break
  *   - Goal: strength & toning; what it means to her: more energy
- *   - RA affecting fingers, wrists, elbows — well controlled, no flares on
- *     medication, symptoms elevated around her cycle. Cleared for resistance
+ *   - Health constraints: kept with John, not in code. Cleared for resistance
  *     training.
  *   - Home gym: treadmill, 4 kg dumbbells, 6/8/10 kg kettlebells, resistance
  *     bands, yoga blocks, foam roller, ankle/wrist weights 0.5-2 kg, bench,
